@@ -14,6 +14,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from huggingface_hub import hf_hub_download
 
 from backend.clip_state import ClipEntry, ClipState, scan_project_clips
 from backend.ffmpeg_tools import (
@@ -36,9 +37,31 @@ from backend.project import (
 from backend.service import CorridorKeyService, InferenceParams
 from CorridorKeyModule.backend import resolve_backend
 
-from .models import CapabilityDto, ClipDto, JobDto, ProjectDto, SnapshotDto, ValidationIssueDto
+from .models import CapabilityDto, ClipDto, DownloadTaskDto, JobDto, ProjectDto, SnapshotDto, ValidationIssueDto
 
 logger = logging.getLogger(__name__)
+
+GVM_REPO_ID = "geyongtao/gvm"
+GVM_REQUIRED_FILES = [
+    "scheduler/scheduler_config.json",
+    "unet/config.json",
+    "unet/diffusion_pytorch_model.safetensors",
+    "vae/config.json",
+    "vae/diffusion_pytorch_model.safetensors",
+]
+GVM_OPTIONAL_FILES = [
+    "unet/adapter_config.json",
+    "unet/pytorch_lora_weights.pt",
+]
+GVM_FILE_SIZES = {
+    "scheduler/scheduler_config.json": 274,
+    "unet/adapter_config.json": 873,
+    "unet/config.json": 1060,
+    "unet/diffusion_pytorch_model.safetensors": 6088185968,
+    "unet/pytorch_lora_weights.pt": 2687354,
+    "vae/config.json": 561,
+    "vae/diffusion_pytorch_model.safetensors": 391017740,
+}
 
 
 @dataclass
@@ -47,6 +70,22 @@ class SourceCandidate:
     path: str
     display_name: str
     issues: list[ValidationIssueDto]
+
+
+@dataclass
+class DownloadTaskState:
+    artifact: str
+    status: str = "idle"
+    completed_steps: int = 0
+    total_steps: int = 0
+    completed_bytes: int = 0
+    total_bytes: int = 0
+    current_file: str | None = None
+    current_file_bytes: int = 0
+    message: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    error_message: str | None = None
 
 
 class _MemoryLogHandler(logging.Handler):
@@ -63,6 +102,8 @@ class GuiApiState:
         self.service = CorridorKeyService()
         self.queue: GPUJobQueue = self.service.job_queue
         self.logs: deque[str] = deque(maxlen=80)
+        self.download_tasks: dict[str, DownloadTaskState] = {}
+        self.download_lock = threading.Lock()
         self.stop_event = threading.Event()
         self.worker_thread = threading.Thread(target=self._worker_loop, name="corridorkey-gui-worker", daemon=True)
         self.worker_thread.start()
@@ -183,13 +224,19 @@ class GuiApiState:
         torch_checkpoint = any(name.endswith(".pth") for name in os.listdir("CorridorKeyModule/checkpoints"))
         mlx_checkpoint = any(name.endswith(".safetensors") for name in os.listdir("CorridorKeyModule/checkpoints"))
 
-        gvm_available = self._module_available("gvm_core") and os.path.isdir("gvm_core")
+        gvm_weights_ready = self._gvm_weights_ready()
+        gvm_available = self._module_available("gvm_core") and os.path.isdir("gvm_core") and gvm_weights_ready
         videomama_available = self._module_available("VideoMaMaInferenceModule") and os.path.isdir(
             "VideoMaMaInferenceModule"
         )
 
         if not torch_checkpoint:
             warnings.append("CorridorKey .pth checkpoint is missing.")
+        if self._module_available("gvm_core") and not gvm_weights_ready:
+            warnings.append(
+                "GVM weights are missing. Download them from the Desktop app or run "
+                "`uv run hf download geyongtao/gvm --local-dir gvm_core/weights`."
+            )
         if not find_ffmpeg():
             warnings.append("ffmpeg is not available on PATH.")
         if not find_ffprobe():
@@ -201,6 +248,7 @@ class GuiApiState:
             torchCheckpointReady=torch_checkpoint,
             mlxCheckpointReady=mlx_checkpoint,
             gvmAvailable=gvm_available,
+            gvmWeightsReady=gvm_weights_ready,
             videomamaAvailable=videomama_available,
             detectedDevice=detected_device,
             detectedBackend=detected_backend,
@@ -259,7 +307,8 @@ class GuiApiState:
         if clip.state == ClipState.RAW:
             if clip.input_asset and clip.input_asset.asset_type == "video":
                 actions.append("extract")
-            actions.append("gvm")
+            if self._gvm_ready():
+                actions.append("gvm")
         if clip.state == ClipState.MASKED:
             actions.append("videomama")
         if clip.state == ClipState.READY:
@@ -308,6 +357,17 @@ class GuiApiState:
                     message="Alpha hint is missing. Run GVM or attach a matte hint.",
                 )
             )
+            if not self._gvm_ready():
+                issues.append(
+                    ValidationIssueDto(
+                        severity="warning",
+                        code="missing_gvm_weights",
+                        message=(
+                            "GVM is installed but its weights are missing. "
+                            "Download them from the Desktop app setup banner to enable GVM."
+                        ),
+                    )
+                )
         if clip.state == ClipState.MASKED:
             issues.append(
                 ValidationIssueDto(
@@ -344,6 +404,11 @@ class GuiApiState:
         clip = self.load_clip(clip_id)
         if clip is None:
             raise RuntimeError(f"Unknown clip: {clip_id}")
+        if action == "gvm" and not self._gvm_ready():
+            raise RuntimeError(
+                "GVM weights are missing. Download them from the Desktop app or run "
+                "`uv run hf download geyongtao/gvm --local-dir gvm_core/weights`."
+            )
 
         mapping = {
             "extract": JobType.VIDEO_EXTRACT,
@@ -363,6 +428,38 @@ class GuiApiState:
         if job is None:
             raise RuntimeError(f"Unknown job: {job_id}")
         self.queue.cancel_job(job)
+
+    def download_artifact(self, artifact: str) -> DownloadTaskDto:
+        if artifact != "gvm":
+            raise RuntimeError(f"Unsupported download artifact: {artifact}")
+
+        with self.download_lock:
+            existing = self.download_tasks.get(artifact)
+            if existing and existing.status in {"queued", "running"}:
+                return self._download_dto(existing)
+
+            task = DownloadTaskState(
+                artifact=artifact,
+                status="queued",
+                completed_steps=0,
+                total_steps=len(GVM_REQUIRED_FILES) + len(GVM_OPTIONAL_FILES),
+                completed_bytes=0,
+                total_bytes=sum(GVM_FILE_SIZES[filename] for filename in [*GVM_REQUIRED_FILES, *GVM_OPTIONAL_FILES]),
+                current_file=None,
+                current_file_bytes=0,
+                message="Queued GVM weight download.",
+                started_at=datetime.now().isoformat(),
+            )
+            self.download_tasks[artifact] = task
+
+        thread = threading.Thread(
+            target=self._download_gvm_weights,
+            args=(artifact,),
+            name="corridorkey-download-gvm",
+            daemon=True,
+        )
+        thread.start()
+        return self._download_dto(task)
 
     def import_sources(self, paths: list[str], copy_source: bool) -> tuple[ProjectDto, list[ValidationIssueDto]]:
         candidates, issues = self._collect_candidates(paths)
@@ -612,6 +709,7 @@ class GuiApiState:
             projects=self.list_projects(),
             jobs=[self._job_dto(job) for job in self.queue.all_jobs_snapshot],
             capabilities=self.capabilities(),
+            downloads=self.downloads_snapshot(),
             logs=list(self.logs),
         )
 
@@ -631,6 +729,87 @@ class GuiApiState:
             warningCount=job.warning_count,
             errorMessage=job.error_message,
         )
+
+    def downloads_snapshot(self) -> list[DownloadTaskDto]:
+        with self.download_lock:
+            return [self._download_dto(task) for task in self.download_tasks.values()]
+
+    @staticmethod
+    def _download_dto(task: DownloadTaskState) -> DownloadTaskDto:
+        return DownloadTaskDto(
+            artifact=task.artifact,
+            status=task.status,
+            completedSteps=task.completed_steps,
+            totalSteps=task.total_steps,
+            completedBytes=task.completed_bytes,
+            totalBytes=task.total_bytes,
+            currentFile=task.current_file,
+            currentFileBytes=task.current_file_bytes,
+            message=task.message,
+            startedAt=task.started_at,
+            finishedAt=task.finished_at,
+            errorMessage=task.error_message,
+        )
+
+    @staticmethod
+    def _gvm_weights_root() -> Path:
+        return Path("gvm_core") / "weights"
+
+    def _gvm_weights_ready(self) -> bool:
+        root = self._gvm_weights_root()
+        return all((root / relative_path).is_file() for relative_path in GVM_REQUIRED_FILES)
+
+    def _gvm_ready(self) -> bool:
+        return self._module_available("gvm_core") and os.path.isdir("gvm_core") and self._gvm_weights_ready()
+
+    def _download_gvm_weights(self, artifact: str) -> None:
+        root = self._gvm_weights_root()
+        root.mkdir(parents=True, exist_ok=True)
+        files = [*GVM_REQUIRED_FILES, *GVM_OPTIONAL_FILES]
+
+        with self.download_lock:
+            task = self.download_tasks[artifact]
+            task.status = "running"
+            task.message = "Downloading GVM weights from Hugging Face..."
+            task.error_message = None
+
+        logger.info("Starting GVM weight download into %s", root)
+
+        try:
+            for index, filename in enumerate(files, start=1):
+                with self.download_lock:
+                    task = self.download_tasks[artifact]
+                    task.current_file = filename
+                    task.current_file_bytes = GVM_FILE_SIZES.get(filename, 0)
+                    task.message = f"Downloading GVM file {index}/{len(files)}: {filename}"
+                hf_hub_download(
+                    repo_id=GVM_REPO_ID,
+                    filename=filename,
+                    local_dir=root,
+                )
+                with self.download_lock:
+                    task = self.download_tasks[artifact]
+                    task.completed_steps = index
+                    task.completed_bytes += GVM_FILE_SIZES.get(filename, 0)
+                    task.message = f"Downloaded {index}/{len(files)} GVM files."
+
+            with self.download_lock:
+                task = self.download_tasks[artifact]
+                task.status = "completed"
+                task.current_file = None
+                task.current_file_bytes = 0
+                task.finished_at = datetime.now().isoformat()
+                task.message = "GVM weights downloaded successfully."
+            logger.info("GVM weights downloaded successfully.")
+        except Exception as error:
+            logger.exception("Failed to download GVM weights")
+            with self.download_lock:
+                task = self.download_tasks[artifact]
+                task.status = "failed"
+                task.current_file = None
+                task.finished_at = datetime.now().isoformat()
+                task.error_message = str(error)
+                task.message = "GVM weight download failed."
 
     @staticmethod
     def _load_source_frame(clip: ClipEntry, frame_index: int) -> np.ndarray:

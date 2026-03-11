@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import base64
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from backend.gui_api.app import app, gui_state
-from backend.gui_api.models import CapabilityDto, ProjectDto, SnapshotDto, ValidationIssueDto
+from backend.gui_api.models import CapabilityDto, DownloadTaskDto, ProjectDto, SnapshotDto, ValidationIssueDto
 from backend.gui_api.state import GuiApiState
 
 
@@ -18,6 +19,7 @@ class _FakeState:
             torchCheckpointReady=True,
             mlxCheckpointReady=False,
             gvmAvailable=True,
+            gvmWeightsReady=True,
             videomamaAvailable=False,
             detectedDevice="cpu",
             detectedBackend="torch",
@@ -52,6 +54,22 @@ class _FakeState:
     def cancel_job(self, job_id: str):
         return None
 
+    def download_artifact(self, artifact: str):
+        return DownloadTaskDto(
+            artifact=artifact,
+            status="queued",
+            completedSteps=0,
+            totalSteps=7,
+            completedBytes=0,
+            totalBytes=6481893830,
+            currentFile=None,
+            currentFileBytes=0,
+            message="queued",
+            startedAt=None,
+            finishedAt=None,
+            errorMessage=None,
+        )
+
     def frame_png(self, clip_id: str, view: str, frame_index: int):
         png_bytes = base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9W8LdnQAAAAASUVORK5CYII="
@@ -70,7 +88,7 @@ class _FakeState:
         }
 
     def snapshot(self):
-        return SnapshotDto(projects=[], jobs=[], capabilities=self.capabilities(), logs=["hello"])
+        return SnapshotDto(projects=[], jobs=[], capabilities=self.capabilities(), downloads=[], logs=["hello"])
 
 
 def test_health_endpoint_with_auth(monkeypatch):
@@ -121,6 +139,19 @@ def test_capabilities_response_includes_cors_headers(monkeypatch):
             )
             assert response.status_code == 200
             assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_download_endpoint_queues_artifact(monkeypatch):
+    monkeypatch.setenv("CORRIDORKEY_GUI_API_TOKEN", "secret")
+    app.dependency_overrides[gui_state] = lambda: _FakeState()
+    try:
+        with TestClient(app) as client:
+            response = client.post("/downloads/gvm", headers={"Authorization": "Bearer secret"})
+            assert response.status_code == 200
+            assert response.json()["artifact"] == "gvm"
+            assert response.json()["status"] == "queued"
     finally:
         app.dependency_overrides.clear()
 
@@ -187,6 +218,86 @@ def test_snapshot_contains_logs(monkeypatch):
     try:
         snapshot = state.snapshot()
         assert snapshot.logs is not None
+        assert snapshot.downloads == []
         assert snapshot.capabilities.detectedDevice in {"cpu", "mps", "cuda"}
+    finally:
+        state.shutdown()
+
+
+def test_raw_clip_hides_gvm_action_when_weights_are_missing(monkeypatch, tmp_path):
+    projects_dir = tmp_path / "Projects"
+    seq_dir = tmp_path / "Sequence"
+    seq_dir.mkdir()
+    for index in range(2):
+        (seq_dir / f"frame_{index:04d}.png").write_bytes(b"fake")
+
+    monkeypatch.setattr("backend.gui_api.state.projects_root", lambda: str(projects_dir))
+    monkeypatch.setattr(GuiApiState, "_gvm_ready", lambda self: False)
+
+    state = GuiApiState()
+    try:
+        project, _issues = state.import_sources([str(seq_dir)], copy_source=True)
+        clip = project.clips[0]
+        assert "gvm" not in clip.availableActions
+        assert any(issue.code == "missing_gvm_weights" for issue in clip.validationIssues)
+    finally:
+        state.shutdown()
+
+
+def test_queue_gvm_rejects_when_weights_are_missing(monkeypatch, tmp_path):
+    projects_dir = tmp_path / "Projects"
+    seq_dir = tmp_path / "Sequence"
+    seq_dir.mkdir()
+    for index in range(2):
+        (seq_dir / f"frame_{index:04d}.png").write_bytes(b"fake")
+
+    monkeypatch.setattr("backend.gui_api.state.projects_root", lambda: str(projects_dir))
+    monkeypatch.setattr(GuiApiState, "_gvm_ready", lambda self: False)
+
+    state = GuiApiState()
+    try:
+        project, _issues = state.import_sources([str(seq_dir)], copy_source=True)
+        clip = project.clips[0]
+        try:
+            state.queue_clip_action(clip.id, "gvm")
+        except RuntimeError as error:
+            assert "GVM weights are missing" in str(error)
+        else:
+            raise AssertionError("Expected queue_clip_action to reject missing GVM weights")
+    finally:
+        state.shutdown()
+
+
+def test_download_gvm_artifact_marks_weights_ready(monkeypatch, tmp_path):
+    weights_root = tmp_path / "weights"
+
+    def fake_download(repo_id: str, filename: str, local_dir: Path):
+        assert repo_id == "geyongtao/gvm"
+        target = Path(local_dir) / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("ok")
+        return str(target)
+
+    monkeypatch.setattr("backend.gui_api.state.hf_hub_download", fake_download)
+    monkeypatch.setattr(GuiApiState, "_gvm_weights_root", staticmethod(lambda: weights_root))
+    monkeypatch.setattr(GuiApiState, "_module_available", staticmethod(lambda _module_name: True))
+
+    state = GuiApiState()
+    try:
+        task = state.download_artifact("gvm")
+        assert task.status == "queued"
+
+        for _ in range(100):
+            snapshot = state.downloads_snapshot()
+            if snapshot and snapshot[0].status == "completed":
+                break
+            time.sleep(0.01)
+
+        snapshot = state.downloads_snapshot()
+        assert snapshot[0].status == "completed"
+        assert snapshot[0].totalBytes == 6481893830
+        assert snapshot[0].completedBytes == 6481893830
+        assert state.capabilities().gvmWeightsReady is True
+        assert state.capabilities().gvmAvailable is True
     finally:
         state.shutdown()

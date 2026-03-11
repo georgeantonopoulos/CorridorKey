@@ -11,6 +11,7 @@ export type CapabilityDto = {
   torchCheckpointReady: boolean;
   mlxCheckpointReady: boolean;
   gvmAvailable: boolean;
+  gvmWeightsReady: boolean;
   videomamaAvailable: boolean;
   detectedDevice: string;
   detectedBackend: string;
@@ -62,6 +63,21 @@ export type JobDto = {
   errorMessage: string | null;
 };
 
+export type DownloadTaskDto = {
+  artifact: string;
+  status: string;
+  completedSteps: number;
+  totalSteps: number;
+  completedBytes: number;
+  totalBytes: number;
+  currentFile: string | null;
+  currentFileBytes: number;
+  message: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  errorMessage: string | null;
+};
+
 export type SettingsState = {
   inputIsLinear: boolean;
   despillStrength: number;
@@ -74,5 +90,6 @@ export type SnapshotDto = {
   projects: ProjectDto[];
   jobs: JobDto[];
   capabilities: CapabilityDto;
+  downloads: DownloadTaskDto[];
   logs: string[];
 };

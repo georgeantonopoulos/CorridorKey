@@ -6,8 +6,17 @@ import { FrameViewer } from "./components/FrameViewer";
 import { ProjectRail } from "./components/ProjectRail";
 import { QueuePanel } from "./components/QueuePanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { cancelJob, connectSnapshots, fetchCapabilities, fetchProjects, importSources, queueClipAction, refreshProject } from "./lib/api";
-import type { BackendStatus, CapabilityDto, ClipDto, JobDto, ProjectDto, SettingsState } from "./lib/types";
+import {
+  cancelJob,
+  connectSnapshots,
+  downloadArtifact,
+  fetchCapabilities,
+  fetchProjects,
+  importSources,
+  queueClipAction,
+  refreshProject
+} from "./lib/api";
+import type { BackendStatus, CapabilityDto, ClipDto, DownloadTaskDto, JobDto, ProjectDto, SettingsState } from "./lib/types";
 
 const defaultSettings: SettingsState = {
   inputIsLinear: false,
@@ -22,6 +31,7 @@ export function App() {
   const [capabilities, setCapabilities] = useState<CapabilityDto | null>(null);
   const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [jobs, setJobs] = useState<JobDto[]>([]);
+  const [downloads, setDownloads] = useState<DownloadTaskDto[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -46,6 +56,7 @@ export function App() {
       setJobs(snapshot.jobs);
       setProjects(snapshot.projects);
       setCapabilities(snapshot.capabilities);
+      setDownloads(snapshot.downloads);
       setLogs(snapshot.logs);
     }).then((cleanup) => {
       disconnect = cleanup;
@@ -70,15 +81,19 @@ export function App() {
   );
 
   async function handleImport() {
-    const result = await window.corridorDesktop.pickInputs();
-    if (result.canceled || !result.filePaths.length) {
-      return;
-    }
-    await importSources(result.filePaths, true);
-    const refreshed = await fetchProjects();
-    setProjects(refreshed);
-    if (refreshed[0]) {
-      setSelectedProjectId(refreshed[0].id);
+    try {
+      const result = await window.corridorDesktop.pickInputs();
+      if (result.canceled || !result.filePaths.length) {
+        return;
+      }
+      await importSources(result.filePaths, true);
+      const refreshed = await fetchProjects();
+      setProjects(refreshed);
+      if (refreshed[0]) {
+        setSelectedProjectId(refreshed[0].id);
+      }
+    } catch (error) {
+      setLogs((items) => [String(error), ...items].slice(0, 30));
     }
   }
 
@@ -86,15 +101,33 @@ export function App() {
     if (!selectedClip) {
       return;
     }
-    await queueClipAction(selectedClip.id, action, settings);
-    const projectId = selectedClip.id.split("/")[0];
-    const refreshed = await refreshProject(projectId);
-    setProjects((items) => items.map((project) => (project.id === refreshed.id ? refreshed : project)));
+    try {
+      await queueClipAction(selectedClip.id, action, settings);
+      const projectId = selectedClip.id.split("/")[0];
+      const refreshed = await refreshProject(projectId);
+      setProjects((items) => items.map((project) => (project.id === refreshed.id ? refreshed : project)));
+    } catch (error) {
+      setLogs((items) => [String(error), ...items].slice(0, 30));
+    }
+  }
+
+  async function handleDownload(artifact: "gvm") {
+    try {
+      const task = await downloadArtifact(artifact);
+      setDownloads((items) => [...items.filter((item) => item.artifact !== artifact), task]);
+    } catch (error) {
+      setLogs((items) => [String(error), ...items].slice(0, 30));
+    }
   }
 
   return (
     <div className="app-shell">
-      <CapabilityBanner capabilities={capabilities} backendMessage={backendStatus?.message ?? null} />
+      <CapabilityBanner
+        capabilities={capabilities}
+        downloads={downloads}
+        backendMessage={backendStatus?.message ?? null}
+        onDownload={handleDownload}
+      />
       <div className="workspace">
         <ProjectRail
           projects={projects}

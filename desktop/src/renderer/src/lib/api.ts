@@ -1,4 +1,4 @@
-import type { SettingsState, SnapshotDto } from "./types";
+import type { DownloadTaskDto, SettingsState, SnapshotDto } from "./types";
 
 async function authedFetch(pathname: string, init: RequestInit = {}): Promise<Response> {
   const backend = await window.corridorDesktop.getBackendStatus();
@@ -75,6 +75,17 @@ export async function cancelJob(jobId: string) {
   if (!response.ok) {
     throw new Error("Failed to cancel job");
   }
+}
+
+export async function downloadArtifact(artifact: "gvm"): Promise<DownloadTaskDto> {
+  const response = await authedFetch(`/downloads/${artifact}`, {
+    method: "POST"
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Failed to start ${artifact} download`);
+  }
+  return response.json();
 }
 
 export async function previewFrame(clipId: string, frameIndex: number, settings: SettingsState) {

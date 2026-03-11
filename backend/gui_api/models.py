@@ -16,6 +16,7 @@ class CapabilityDto(BaseModel):
     torchCheckpointReady: bool
     mlxCheckpointReady: bool
     gvmAvailable: bool
+    gvmWeightsReady: bool
     videomamaAvailable: bool
     detectedDevice: str
     detectedBackend: str
@@ -84,8 +85,24 @@ class ClipActionRequest(BaseModel):
     settings: dict | None = None
 
 
+class DownloadTaskDto(BaseModel):
+    artifact: str
+    status: str
+    completedSteps: int = 0
+    totalSteps: int = 0
+    completedBytes: int = 0
+    totalBytes: int = 0
+    currentFile: str | None = None
+    currentFileBytes: int = 0
+    message: str | None = None
+    startedAt: str | None = None
+    finishedAt: str | None = None
+    errorMessage: str | None = None
+
+
 class SnapshotDto(BaseModel):
     projects: list[ProjectDto]
     jobs: list[JobDto]
     capabilities: CapabilityDto
+    downloads: list[DownloadTaskDto] = Field(default_factory=list)
     logs: list[str]

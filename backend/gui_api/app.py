@@ -132,6 +132,11 @@ def cancel_job(job_id: str, state: Annotated[GuiApiState, Depends(gui_state)]):
     return {"status": "cancelled"}
 
 
+@app.post("/downloads/{artifact}", dependencies=[Depends(_token_guard)])
+def download_artifact(artifact: str, state: Annotated[GuiApiState, Depends(gui_state)]):
+    return state.download_artifact(artifact)
+
+
 @app.get("/clips/{clip_id:path}/frame", dependencies=[Depends(_token_guard)])
 def clip_frame(
     clip_id: str,
