@@ -1,0 +1,78 @@
+export type BackendStatus = {
+  status: "starting" | "ready" | "error" | "stopped";
+  url: string | null;
+  authToken: string | null;
+  message: string | null;
+};
+
+export type CapabilityDto = {
+  ffmpegAvailable: boolean;
+  ffprobeAvailable: boolean;
+  torchCheckpointReady: boolean;
+  mlxCheckpointReady: boolean;
+  gvmAvailable: boolean;
+  videomamaAvailable: boolean;
+  detectedDevice: string;
+  detectedBackend: string;
+  warnings: string[];
+};
+
+export type ValidationIssueDto = {
+  severity: "info" | "warning" | "error";
+  code: string;
+  message: string;
+  path?: string | null;
+};
+
+export type ClipDto = {
+  id: string;
+  name: string;
+  state: string;
+  rootPath: string;
+  inputType: string | null;
+  frameCount: number;
+  alphaFrameCount: number;
+  validationIssues: ValidationIssueDto[];
+  currentJobId: string | null;
+  lastJobId: string | null;
+  availableActions: string[];
+  hasOutputs: boolean;
+};
+
+export type ProjectDto = {
+  id: string;
+  displayName: string;
+  rootPath: string;
+  clipCount: number;
+  clips: ClipDto[];
+};
+
+export type JobDto = {
+  id: string;
+  clipId: string | null;
+  clipName: string;
+  jobType: string;
+  status: string;
+  currentFrame: number;
+  totalFrames: number;
+  phaseLabel: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  warningCount: number;
+  errorMessage: string | null;
+};
+
+export type SettingsState = {
+  inputIsLinear: boolean;
+  despillStrength: number;
+  autoDespeckle: boolean;
+  despeckleSize: number;
+  refinerScale: number;
+};
+
+export type SnapshotDto = {
+  projects: ProjectDto[];
+  jobs: JobDto[];
+  capabilities: CapabilityDto;
+  logs: string[];
+};

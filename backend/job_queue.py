@@ -22,6 +22,7 @@ import threading
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable
 
@@ -58,6 +59,11 @@ class GPUJob:
     status: JobStatus = JobStatus.QUEUED
     _cancel_requested: bool = field(default=False, repr=False)
     error_message: str | None = None
+    clip_id: str | None = None
+    phase_label: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    warning_count: int = 0
 
     # Progress tracking
     current_frame: int = 0
@@ -173,6 +179,8 @@ class GPUJobQueue:
             if job in self._queue:
                 self._queue.remove(job)
             job.status = JobStatus.RUNNING
+            job.started_at = datetime.now(timezone.utc).isoformat()
+            job.finished_at = None
             self._current_job = job
             logger.info(f"Job started [{job.id}]: {job.job_type.value} for '{job.clip_name}'")
 
@@ -180,6 +188,7 @@ class GPUJobQueue:
         """Mark a job as successfully completed."""
         with self._lock:
             job.status = JobStatus.COMPLETED
+            job.finished_at = datetime.now(timezone.utc).isoformat()
             if self._current_job is job:
                 self._current_job = None
             self._history.append(job)
@@ -193,6 +202,7 @@ class GPUJobQueue:
         with self._lock:
             job.status = JobStatus.FAILED
             job.error_message = error
+            job.finished_at = datetime.now(timezone.utc).isoformat()
             if self._current_job is job:
                 self._current_job = None
             self._history.append(job)
@@ -210,6 +220,7 @@ class GPUJobQueue:
         """
         with self._lock:
             job.status = JobStatus.CANCELLED
+            job.finished_at = datetime.now(timezone.utc).isoformat()
             if self._current_job is job:
                 self._current_job = None
             self._history.append(job)
@@ -222,6 +233,7 @@ class GPUJobQueue:
                 if job in self._queue:
                     self._queue.remove(job)
                 job.status = JobStatus.CANCELLED
+                job.finished_at = datetime.now(timezone.utc).isoformat()
                 self._history.append(job)
                 logger.info(f"Job removed from queue [{job.id}]: {job.job_type.value} for '{job.clip_name}'")
             elif job.status == JobStatus.RUNNING:
@@ -256,9 +268,16 @@ class GPUJobQueue:
         if self.on_progress:
             self.on_progress(clip_name, current, total)
 
+    def report_phase(self, label: str) -> None:
+        """Update the phase label for the currently running job."""
+        if self._current_job:
+            self._current_job.phase_label = label
+
     def report_warning(self, message: str) -> None:
         """Report a non-fatal warning. Called by processing code."""
         logger.warning(message)
+        if self._current_job:
+            self._current_job.warning_count += 1
         if self.on_warning:
             self.on_warning(message)
 

@@ -28,6 +28,17 @@ CorridorKey_remote.bat
 .vscode/
 .idea/
 
+# Node / Electron
+desktop/node_modules/
+desktop/dist/
+desktop/.vite/
+desktop/out/
+desktop/.electron-forge/
+desktop/.playwright/
+desktop/test-results/
+desktop/playwright-report/
+desktop/coverage/
+
 # Models & Checkpoints (Large Files)
 *.pth
 *.pt
