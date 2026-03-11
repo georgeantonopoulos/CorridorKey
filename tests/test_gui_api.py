@@ -85,6 +85,46 @@ def test_health_endpoint_with_auth(monkeypatch):
         app.dependency_overrides.clear()
 
 
+def test_cors_preflight_allows_renderer_import_request(monkeypatch):
+    monkeypatch.setenv("CORRIDORKEY_GUI_API_TOKEN", "secret")
+    app.dependency_overrides[gui_state] = lambda: _FakeState()
+    try:
+        with TestClient(app) as client:
+            response = client.options(
+                "/projects/import",
+                headers={
+                    "Origin": "http://localhost:5173",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "authorization,content-type",
+                },
+            )
+            assert response.status_code == 200
+            assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+            allowed_headers = response.headers["access-control-allow-headers"].lower()
+            assert "authorization" in allowed_headers
+            assert "content-type" in allowed_headers
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_capabilities_response_includes_cors_headers(monkeypatch):
+    monkeypatch.setenv("CORRIDORKEY_GUI_API_TOKEN", "secret")
+    app.dependency_overrides[gui_state] = lambda: _FakeState()
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/capabilities",
+                headers={
+                    "Origin": "http://localhost:5173",
+                    "Authorization": "Bearer secret",
+                },
+            )
+            assert response.status_code == 200
+            assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_frame_endpoint_returns_png(monkeypatch):
     monkeypatch.setenv("CORRIDORKEY_GUI_API_TOKEN", "secret")
     app.dependency_overrides[gui_state] = lambda: _FakeState()

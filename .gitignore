@@ -16,6 +16,8 @@ venv.bak/
 # Project Specific
 ClipsForInference/*
 !ClipsForInference/.gitkeep
+Projects/*
+!Projects/.gitkeep
 Output/*
 !Output/.gitkeep
 Ignored*/*

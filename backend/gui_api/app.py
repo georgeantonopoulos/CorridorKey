@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from .models import ClipActionRequest, ImportRequest, PreviewRequest
@@ -36,6 +37,27 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="CorridorKey GUI API", lifespan=lifespan)
+
+
+def _allowed_origins() -> list[str]:
+    configured = os.environ.get("CORRIDORKEY_GUI_ALLOWED_ORIGINS", "")
+    origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
+    if origins:
+        return origins
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "null",
+    ]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def gui_state() -> GuiApiState:
