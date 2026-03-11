@@ -23,6 +23,12 @@ from .gvm.utils.inference_utils import VideoReader, VideoWriter, ImageSequenceRe
 from .gvm.models.unet_spatio_temporal_condition import UNetSpatioTemporalConditionModel
 
 
+def enable_device_optimizations(pipe, device):
+    if getattr(device, "type", None) == "mps" and hasattr(pipe, "enable_attention_slicing"):
+        pipe.enable_attention_slicing()
+        logging.info("Enabled GVM attention slicing for MPS.")
+
+
 def seed_all(seed: int = 0):
     """Seed all random number generators for reproducibility.
 
@@ -100,6 +106,7 @@ class GVMProcessor:
             elif lora_base:
                 self.pipe.load_lora_weights(lora_base)
                 
+        enable_device_optimizations(self.pipe, self.device)
         self.pipe = self.pipe.to(self.device, dtype=torch.float16)
         logging.info("Models loaded.")
 
@@ -114,7 +121,8 @@ class GVMProcessor:
                          noise_type='zeros',
                          mode='matte',
                          write_video=True,
-                         direct_output_dir=None):
+                         direct_output_dir=None,
+                         progress_callback=None):
         """
         Process a single video or directory of images.
         """
@@ -225,6 +233,8 @@ class GVMProcessor:
         lower_bound = 25./ 255.
 
         for batch_id, batch in tqdm(enumerate(dataloader), total=len(dataloader), desc=f"Inferencing {file_name}"):
+            if progress_callback is not None:
+                progress_callback(batch_id, len(dataloader))
             filenames = []
             if is_video:
                 b, _, h, w = batch.shape
@@ -274,6 +284,9 @@ class GVMProcessor:
 
             if writer_alpha: writer_alpha.write(alpha)
             writer_alpha_seq.write(alpha, filenames=filenames)
+
+        if progress_callback is not None:
+            progress_callback(len(dataloader), len(dataloader))
         
         if writer_alpha: writer_alpha.close()
         writer_alpha_seq.close()

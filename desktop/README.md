@@ -34,6 +34,29 @@ Before running inference, make sure the required model weights are installed:
 
 If GVM is installed but its weights are missing, the app now shows a setup action in the capability banner so you can download the GVM weights from inside the GUI.
 
+## Apple Silicon MPS Tuning
+
+On Apple Silicon Macs, the Electron launcher now enables two PyTorch MPS tuning flags by default for the backend process:
+
+- `PYTORCH_MPS_FAST_MATH=1`
+- `PYTORCH_MPS_PREFER_METAL=1`
+
+These are applied only on `darwin` + `arm64`, so CUDA and non-Mac machines are unaffected.
+
+For A/B testing, you can disable them before launching the desktop app:
+
+```bash
+CORRIDORKEY_ENABLE_MPS_FAST_MATH=0 \
+CORRIDORKEY_ENABLE_MPS_PREFER_METAL=0 \
+npm run dev
+```
+
+You can also pass an optional MPS allocator override through to the backend:
+
+```bash
+CORRIDORKEY_MPS_HIGH_WATERMARK_RATIO=0.0 npm run dev
+```
+
 ## Recommended Workflow
 
 1. Launch the desktop app.

@@ -3,13 +3,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 import fs from "node:fs";
-
-type BackendStatus = {
-  status: "starting" | "ready" | "error" | "stopped";
-  url: string | null;
-  authToken: string | null;
-  message: string | null;
-};
+import { buildBackendEnv } from "./backend-env";
+import { sendBackendStatus, type BackendStatus } from "./backend-status";
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -25,16 +20,6 @@ let backendStatus: BackendStatus = {
 
 const repoRoot = path.resolve(__dirname, "../../..");
 const preferredPython = path.join(repoRoot, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
-
-function buildBackendEnv(port: number, token: string): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    CORRIDORKEY_GUI_API_HOST: "127.0.0.1",
-    CORRIDORKEY_GUI_API_PORT: String(port),
-    CORRIDORKEY_GUI_API_TOKEN: token,
-    PYTHONUNBUFFERED: "1"
-  };
-}
 
 async function probeBackend(url: string, token: string): Promise<boolean> {
   try {
@@ -73,7 +58,7 @@ async function startBackend(): Promise<void> {
     const message = chunk.toString().trim();
     if (message) {
       backendStatus = { ...backendStatus, message };
-      mainWindow?.webContents.send("backend-status", backendStatus);
+      sendBackendStatus(mainWindow, backendStatus);
     }
   });
 
@@ -81,7 +66,7 @@ async function startBackend(): Promise<void> {
     const message = chunk.toString().trim();
     if (message) {
       backendStatus = { ...backendStatus, message };
-      mainWindow?.webContents.send("backend-status", backendStatus);
+      sendBackendStatus(mainWindow, backendStatus);
     }
   });
 
@@ -91,7 +76,7 @@ async function startBackend(): Promise<void> {
       status: "stopped",
       message: code === 0 ? "Backend stopped." : `Backend exited with code ${code ?? "unknown"}.`
     };
-    mainWindow?.webContents.send("backend-status", backendStatus);
+    sendBackendStatus(mainWindow, backendStatus);
   });
 
   for (let attempt = 0; attempt < 60; attempt += 1) {
@@ -143,7 +128,10 @@ async function createWindow(): Promise<void> {
   }
 
   mainWindow.webContents.on("did-finish-load", () => {
-    mainWindow?.webContents.send("backend-status", backendStatus);
+    sendBackendStatus(mainWindow, backendStatus);
+  });
+  mainWindow.on("closed", () => {
+    mainWindow = null;
   });
 }
 
