@@ -11,6 +11,8 @@ from pathlib import Path
 
 import numpy as np
 
+from device_utils import get_system_memory_gb, recommend_mps_img_size
+
 logger = logging.getLogger(__name__)
 
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
@@ -210,7 +212,7 @@ DEFAULT_MLX_TILE_OVERLAP = 64
 def create_engine(
     backend: str | None = None,
     device: str | None = None,
-    img_size: int = DEFAULT_IMG_SIZE,
+    img_size: int | None = None,
     tile_size: int | None = DEFAULT_MLX_TILE_SIZE,
     overlap: int = DEFAULT_MLX_TILE_OVERLAP,
 ):
@@ -227,7 +229,10 @@ def create_engine(
         ckpt = _discover_checkpoint(MLX_EXT)
         from corridorkey_mlx import CorridorKeyMLXEngine  # type: ignore[import-not-found]
 
-        raw_engine = CorridorKeyMLXEngine(str(ckpt), img_size=img_size, tile_size=tile_size, overlap=overlap)
+        effective_img_size = img_size or DEFAULT_IMG_SIZE
+        raw_engine = CorridorKeyMLXEngine(
+            str(ckpt), img_size=effective_img_size, tile_size=tile_size, overlap=overlap
+        )
         mode = f"tiled (tile={tile_size}, overlap={overlap})" if tile_size else "full-frame"
         logger.info("MLX engine loaded: %s [%s]", ckpt.name, mode)
         return _MLXEngineAdapter(raw_engine)
@@ -235,5 +240,16 @@ def create_engine(
         ckpt = _discover_checkpoint(TORCH_EXT)
         from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
-        logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device)
-        return CorridorKeyEngine(checkpoint_path=str(ckpt), device=device or "cpu", img_size=img_size)
+        effective_device = device or "cpu"
+
+        # Auto-scale resolution on MPS when user hasn't explicitly set img_size
+        if img_size is not None:
+            effective_img_size = img_size
+        elif effective_device == "mps":
+            system_mem = get_system_memory_gb()
+            effective_img_size = recommend_mps_img_size(system_mem, device=effective_device)
+        else:
+            effective_img_size = DEFAULT_IMG_SIZE
+
+        logger.info("Torch engine loaded: %s (device=%s, img_size=%d)", ckpt.name, effective_device, effective_img_size)
+        return CorridorKeyEngine(checkpoint_path=str(ckpt), device=effective_device, img_size=effective_img_size)
