@@ -9,6 +9,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from device_utils import clear_device_cache
+
 from .core import color_utils as cu
 from .core.model_transformer import GreenFormer
 
@@ -198,6 +200,13 @@ class CorridorKeyEngine:
         res_fg = pred_fg[0].permute(1, 2, 0).float().cpu().numpy()
         res_alpha = cv2.resize(res_alpha, (w, h), interpolation=cv2.INTER_LANCZOS4)
         res_fg = cv2.resize(res_fg, (w, h), interpolation=cv2.INTER_LANCZOS4)
+
+        # Clear MPS cache between frames to prevent memory accumulation.
+        # MPS unified memory can fill up across frames during batch processing.
+        # We intentionally do NOT clear CUDA cache here — CUDA's allocator
+        # benefits from keeping cached memory for reuse across frames.
+        if self.device.type == "mps":
+            clear_device_cache(self.device)
 
         if res_alpha.ndim == 2:
             res_alpha = res_alpha[:, :, np.newaxis]

@@ -13,6 +13,8 @@ Why mock the model?
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 import torch
@@ -229,3 +231,29 @@ class TestNvidiaGPUProcess:
 
         result = engine.process_frame(sample_frame_rgb, sample_mask)
         assert result["alpha"].dtype == np.float32
+
+
+# ---------------------------------------------------------------------------
+# MPS Cache Clearing
+# ---------------------------------------------------------------------------
+
+
+class TestMpsCacheClearing:
+    """MPS should clear cache after each frame to prevent memory accumulation."""
+
+    def test_mps_cache_cleared_after_frame(self, sample_frame_rgb, sample_mask, mock_greenformer):
+        """On MPS device, torch.mps.empty_cache() should be called after process_frame."""
+        engine = _make_engine_with_mock(mock_greenformer)
+        engine.device = torch.device("mps")
+
+        with patch("CorridorKeyModule.inference_engine.clear_device_cache") as mock_clear:
+            engine.process_frame(sample_frame_rgb, sample_mask)
+            mock_clear.assert_called_once_with(torch.device("mps"))
+
+    def test_cpu_does_not_clear_cache(self, sample_frame_rgb, sample_mask, mock_greenformer):
+        """CPU device should not trigger cache clearing."""
+        engine = _make_engine_with_mock(mock_greenformer)
+
+        with patch("CorridorKeyModule.inference_engine.clear_device_cache") as mock_clear:
+            engine.process_frame(sample_frame_rgb, sample_mask)
+            mock_clear.assert_not_called()
