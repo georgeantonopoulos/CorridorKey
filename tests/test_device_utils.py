@@ -14,6 +14,8 @@ from device_utils import (
     DEVICE_ENV_VAR,
     clear_device_cache,
     detect_best_device,
+    get_system_memory_gb,
+    recommend_mps_img_size,
     resolve_device,
 )
 
@@ -170,3 +172,61 @@ class TestClearDeviceCache:
         monkeypatch.setattr(torch.mps, "empty_cache", mock_empty)
         clear_device_cache(torch.device("mps"))
         mock_empty.assert_called_once()
+
+
+class TestGetSystemMemoryGb:
+    """get_system_memory_gb returns total system RAM in GB."""
+
+    def test_returns_positive_float(self):
+        mem = get_system_memory_gb()
+        assert isinstance(mem, float)
+        assert mem > 0.0
+
+    def test_returns_reasonable_value(self):
+        """Should be between 1GB and 1TB for any real machine."""
+        mem = get_system_memory_gb()
+        assert 1.0 <= mem <= 1024.0
+
+
+class TestRecommendMpsImgSize:
+    """recommend_mps_img_size picks resolution based on available memory."""
+
+    def test_8gb_returns_1024(self):
+        assert recommend_mps_img_size(system_memory_gb=8.0) == 1024
+
+    def test_16gb_returns_1536(self):
+        assert recommend_mps_img_size(system_memory_gb=16.0) == 1536
+
+    def test_32gb_returns_2048(self):
+        assert recommend_mps_img_size(system_memory_gb=32.0) == 2048
+
+    def test_64gb_returns_2048(self):
+        assert recommend_mps_img_size(system_memory_gb=64.0) == 2048
+
+    def test_explicit_override_takes_precedence(self):
+        """If user provides an explicit img_size, return it unchanged."""
+        assert recommend_mps_img_size(system_memory_gb=8.0, user_img_size=2048) == 2048
+
+    def test_non_mps_returns_default(self):
+        """On non-MPS devices, always return default 2048."""
+        assert recommend_mps_img_size(system_memory_gb=8.0, device="cuda") == 2048
+        assert recommend_mps_img_size(system_memory_gb=8.0, device="cpu") == 2048
+
+
+class TestMpsImgSizeIntegration:
+    """Verify recommend_mps_img_size works with real system memory."""
+
+    def test_real_system_returns_valid_tier(self):
+        mem = get_system_memory_gb()
+        size = recommend_mps_img_size(mem)
+        assert size in (1024, 1536, 2048)
+
+    def test_none_img_size_triggers_auto_on_mps(self):
+        """When user_img_size is None, MPS auto-scaling activates."""
+        size = recommend_mps_img_size(system_memory_gb=8.0, user_img_size=None)
+        assert size == 1024
+
+    def test_explicit_2048_overrides_auto(self):
+        """When user explicitly passes 2048, it must be respected even on 8GB."""
+        size = recommend_mps_img_size(system_memory_gb=8.0, user_img_size=2048)
+        assert size == 2048

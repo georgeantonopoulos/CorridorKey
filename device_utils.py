@@ -74,3 +74,69 @@ def clear_device_cache(device: torch.device | str) -> None:
         torch.cuda.empty_cache()
     elif device_type == "mps":
         torch.mps.empty_cache()
+
+
+def get_system_memory_gb() -> float:
+    """Return total system RAM in GB. Works on macOS, Linux, Windows."""
+    try:
+        # POSIX: macOS and Linux (os is already imported at module level)
+        if hasattr(os, "sysconf"):
+            pages = os.sysconf("SC_PHYS_PAGES")
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            if pages > 0 and page_size > 0:
+                return (pages * page_size) / (1024**3)
+    except (ValueError, OSError):
+        pass
+
+    try:
+        import psutil
+
+        return psutil.virtual_memory().total / (1024**3)
+    except ImportError:
+        pass
+
+    logger.warning("Could not determine system memory — assuming 16GB")
+    return 16.0
+
+
+# Resolution thresholds: (min_memory_gb, img_size)
+# Evaluated top-down; first match wins.
+_MPS_RESOLUTION_TIERS = [
+    (24.0, 2048),
+    (12.0, 1536),
+    (0.0, 1024),
+]
+
+
+def recommend_mps_img_size(
+    system_memory_gb: float,
+    device: str = "mps",
+    user_img_size: int | None = None,
+) -> int:
+    """Recommend img_size for MPS based on available system memory.
+
+    Args:
+        system_memory_gb: Total system RAM in GB.
+        device: Target device string. Only "mps" triggers auto-scaling.
+        user_img_size: If provided, returned as-is (user override).
+
+    Returns:
+        Recommended img_size (1024, 1536, or 2048).
+    """
+    if user_img_size is not None:
+        return user_img_size
+
+    if device != "mps":
+        return 2048
+
+    for min_mem, size in _MPS_RESOLUTION_TIERS:
+        if system_memory_gb >= min_mem:
+            if size != 2048:
+                logger.info(
+                    "MPS auto-scale: %.0fGB RAM → img_size=%d (use --img-size to override)",
+                    system_memory_gb,
+                    size,
+                )
+            return size
+
+    return 1024  # fallback
