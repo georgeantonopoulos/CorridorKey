@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, execFileSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createConnection } from "node:net";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 import fs from "node:fs";
@@ -29,6 +30,45 @@ const preferredPython = path.join(repoRoot, ".venv", process.platform === "win32
 const hostInfo: BackendHostInfo = getBackendHostInfo();
 let backendLaunchConfig: BackendLaunchConfig = defaultBackendLaunchConfig();
 
+/**
+ * Check if a port is already in use by attempting a TCP connection.
+ * Returns the PID and command of the occupying process when possible.
+ */
+function checkPortOccupied(port: number): Promise<{ occupied: boolean; pid?: number; command?: string }> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ port, host: "127.0.0.1" });
+    socket.setTimeout(500);
+
+    socket.on("connect", () => {
+      socket.destroy();
+
+      // Port is occupied — try to identify the process (macOS/Linux)
+      try {
+        const output = execFileSync("lsof", ["-ti", `:${port}`, "-sTCP:LISTEN"], { encoding: "utf8", timeout: 2000 }).trim();
+        const pid = parseInt(output.split("\n")[0], 10);
+        if (!isNaN(pid)) {
+          const cmdOutput = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", timeout: 2000 }).trim();
+          resolve({ occupied: true, pid, command: cmdOutput });
+          return;
+        }
+      } catch {
+        // lsof/ps not available or failed — still occupied
+      }
+      resolve({ occupied: true });
+    });
+
+    socket.on("timeout", () => {
+      socket.destroy();
+      resolve({ occupied: false });
+    });
+
+    socket.on("error", () => {
+      socket.destroy();
+      resolve({ occupied: false });
+    });
+  });
+}
+
 async function probeBackend(url: string, token: string): Promise<boolean> {
   try {
     const response = await fetch(`${url}/health`, {
@@ -55,6 +95,20 @@ async function startBackend(): Promise<void> {
     authToken: token,
     message: "Starting Python GUI API..."
   };
+
+  // Fail fast if another process already occupies our port
+  const portCheck = await checkPortOccupied(port);
+  if (portCheck.occupied) {
+    const who = portCheck.pid
+      ? `PID ${portCheck.pid} (${portCheck.command ?? "unknown"})`
+      : "an unknown process";
+    backendStatus = {
+      ...backendStatus,
+      status: "error",
+      message: `Port ${port} is already in use by ${who}. Kill it or restart the app.`
+    };
+    return;
+  }
 
   backendProc = spawn(pythonCommand, ["-m", "backend.gui_api"], {
     cwd: repoRoot,
