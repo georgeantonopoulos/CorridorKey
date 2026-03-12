@@ -16,7 +16,17 @@ import {
   queueClipAction,
   refreshProject
 } from "./lib/api";
-import type { BackendStatus, CapabilityDto, ClipDto, DownloadTaskDto, JobDto, ProjectDto, SettingsState } from "./lib/types";
+import type {
+  BackendLaunchConfig,
+  BackendStatus,
+  CapabilityDto,
+  ClipDto,
+  DownloadTaskDto,
+  HostInfo,
+  JobDto,
+  ProjectDto,
+  SettingsState
+} from "./lib/types";
 
 const defaultSettings: SettingsState = {
   inputIsLinear: false,
@@ -28,6 +38,8 @@ const defaultSettings: SettingsState = {
 
 export function App() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null);
+  const [hostInfo, setHostInfo] = useState<HostInfo | null>(null);
+  const [backendLaunchConfig, setBackendLaunchConfig] = useState<BackendLaunchConfig | null>(null);
   const [capabilities, setCapabilities] = useState<CapabilityDto | null>(null);
   const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [jobs, setJobs] = useState<JobDto[]>([]);
@@ -39,6 +51,8 @@ export function App() {
 
   useEffect(() => {
     window.corridorDesktop.getBackendStatus().then(setBackendStatus);
+    window.corridorDesktop.getHostInfo().then(setHostInfo);
+    window.corridorDesktop.getBackendLaunchConfig().then(setBackendLaunchConfig);
     const unsubscribe = window.corridorDesktop.onBackendStatus(setBackendStatus);
     return unsubscribe;
   }, []);
@@ -120,6 +134,15 @@ export function App() {
     }
   }
 
+  async function handleApplyBackendLaunchConfig(config: BackendLaunchConfig) {
+    try {
+      const nextConfig = await window.corridorDesktop.updateBackendLaunchConfig(config);
+      setBackendLaunchConfig(nextConfig);
+    } catch (error) {
+      setLogs((items) => [String(error), ...items].slice(0, 30));
+    }
+  }
+
   return (
     <div className="app-shell">
       <CapabilityBanner
@@ -173,7 +196,14 @@ export function App() {
           <FrameViewer clip={selectedClip} settings={settings} />
         </main>
         <aside className="rail rail-right">
-          <SettingsPanel settings={settings} onChange={setSettings} />
+          <SettingsPanel
+            settings={settings}
+            backendLaunchConfig={backendLaunchConfig}
+            backendStatus={backendStatus}
+            hostInfo={hostInfo}
+            onApplyBackendLaunchConfig={handleApplyBackendLaunchConfig}
+            onChange={setSettings}
+          />
           <QueuePanel jobs={jobs} onCancel={(jobId) => void cancelJob(jobId)} />
           <ErrorDrawer items={logs} />
         </aside>

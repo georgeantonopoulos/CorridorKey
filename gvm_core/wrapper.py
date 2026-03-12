@@ -232,9 +232,8 @@ class GVMProcessor:
         upper_bound = 240./255.
         lower_bound = 25./ 255.
 
-        for batch_id, batch in tqdm(enumerate(dataloader), total=len(dataloader), desc=f"Inferencing {file_name}"):
-            if progress_callback is not None:
-                progress_callback(batch_id, len(dataloader))
+        total_batches = len(dataloader)
+        for batch_id, batch in tqdm(enumerate(dataloader), total=total_batches, desc=f"Inferencing {file_name}"):
             filenames = []
             if is_video:
                 b, _, h, w = batch.shape
@@ -285,8 +284,8 @@ class GVMProcessor:
             if writer_alpha: writer_alpha.write(alpha)
             writer_alpha_seq.write(alpha, filenames=filenames)
 
-        if progress_callback is not None:
-            progress_callback(len(dataloader), len(dataloader))
+            if progress_callback is not None:
+                progress_callback(batch_id + 1, total_batches)
         
         if writer_alpha: writer_alpha.close()
         writer_alpha_seq.close()

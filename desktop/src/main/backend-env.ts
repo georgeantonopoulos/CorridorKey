@@ -1,6 +1,19 @@
+export type BackendLaunchConfig = {
+  enableMpsFastMath: boolean;
+  enableMpsPreferMetal: boolean;
+  mpsHighWatermarkRatio: string;
+};
+
+export type BackendHostInfo = {
+  arch: NodeJS.Architecture;
+  isAppleSiliconMac: boolean;
+  platform: NodeJS.Platform;
+};
+
 type BackendEnvOptions = {
   arch?: NodeJS.Architecture;
   baseEnv?: NodeJS.ProcessEnv;
+  launchConfig?: BackendLaunchConfig;
   platform?: NodeJS.Platform;
 };
 
@@ -8,10 +21,42 @@ export function isAppleSiliconMac(platform = process.platform, arch = process.ar
   return platform === "darwin" && arch === "arm64";
 }
 
+export function getBackendHostInfo(
+  platform = process.platform,
+  arch = process.arch as NodeJS.Architecture
+): BackendHostInfo {
+  return {
+    platform,
+    arch,
+    isAppleSiliconMac: isAppleSiliconMac(platform, arch)
+  };
+}
+
+export function defaultBackendLaunchConfig(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  platform = process.platform,
+  arch = process.arch as NodeJS.Architecture
+): BackendLaunchConfig {
+  if (!isAppleSiliconMac(platform, arch)) {
+    return {
+      enableMpsFastMath: false,
+      enableMpsPreferMetal: false,
+      mpsHighWatermarkRatio: ""
+    };
+  }
+
+  return {
+    enableMpsFastMath: baseEnv.CORRIDORKEY_ENABLE_MPS_FAST_MATH !== "0",
+    enableMpsPreferMetal: baseEnv.CORRIDORKEY_ENABLE_MPS_PREFER_METAL !== "0",
+    mpsHighWatermarkRatio: baseEnv.CORRIDORKEY_MPS_HIGH_WATERMARK_RATIO ?? ""
+  };
+}
+
 export function buildBackendEnv(port: number, token: string, options: BackendEnvOptions = {}): NodeJS.ProcessEnv {
   const baseEnv = { ...(options.baseEnv ?? process.env) };
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
+  const launchConfig = options.launchConfig ?? defaultBackendLaunchConfig(baseEnv, platform, arch);
 
   const env: NodeJS.ProcessEnv = {
     ...baseEnv,
@@ -22,22 +67,28 @@ export function buildBackendEnv(port: number, token: string, options: BackendEnv
   };
 
   if (!isAppleSiliconMac(platform, arch)) {
+    delete env.PYTORCH_MPS_FAST_MATH;
+    delete env.PYTORCH_MPS_PREFER_METAL;
+    delete env.PYTORCH_MPS_HIGH_WATERMARK_RATIO;
     return env;
   }
 
-  const enableFastMath = baseEnv.CORRIDORKEY_ENABLE_MPS_FAST_MATH ?? "1";
-  const enablePreferMetal = baseEnv.CORRIDORKEY_ENABLE_MPS_PREFER_METAL ?? "1";
-
-  if (enableFastMath !== "0" && env.PYTORCH_MPS_FAST_MATH == null) {
+  if (launchConfig.enableMpsFastMath) {
     env.PYTORCH_MPS_FAST_MATH = "1";
+  } else {
+    delete env.PYTORCH_MPS_FAST_MATH;
   }
 
-  if (enablePreferMetal !== "0" && env.PYTORCH_MPS_PREFER_METAL == null) {
+  if (launchConfig.enableMpsPreferMetal) {
     env.PYTORCH_MPS_PREFER_METAL = "1";
+  } else {
+    delete env.PYTORCH_MPS_PREFER_METAL;
   }
 
-  if (baseEnv.CORRIDORKEY_MPS_HIGH_WATERMARK_RATIO && env.PYTORCH_MPS_HIGH_WATERMARK_RATIO == null) {
-    env.PYTORCH_MPS_HIGH_WATERMARK_RATIO = baseEnv.CORRIDORKEY_MPS_HIGH_WATERMARK_RATIO;
+  if (launchConfig.mpsHighWatermarkRatio.trim()) {
+    env.PYTORCH_MPS_HIGH_WATERMARK_RATIO = launchConfig.mpsHighWatermarkRatio.trim();
+  } else {
+    delete env.PYTORCH_MPS_HIGH_WATERMARK_RATIO;
   }
 
   return env;

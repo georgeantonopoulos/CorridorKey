@@ -155,6 +155,7 @@ class GuiApiState:
                 job=job,
                 on_progress=self.queue.report_progress,
                 on_warning=self.queue.report_warning,
+                on_status=self.queue.report_phase,
             )
             return
 

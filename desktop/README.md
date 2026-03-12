@@ -43,7 +43,9 @@ On Apple Silicon Macs, the Electron launcher now enables two PyTorch MPS tuning 
 
 These are applied only on `darwin` + `arm64`, so CUDA and non-Mac machines are unaffected.
 
-For A/B testing, you can disable them before launching the desktop app:
+The Desktop app also exposes these toggles in the settings panel on Apple Silicon. Applying changes from the GUI restarts the Python backend.
+
+For A/B testing from the shell, you can still disable them before launching the desktop app:
 
 ```bash
 CORRIDORKEY_ENABLE_MPS_FAST_MATH=0 \

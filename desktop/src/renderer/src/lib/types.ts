@@ -5,6 +5,18 @@ export type BackendStatus = {
   message: string | null;
 };
 
+export type BackendLaunchConfig = {
+  enableMpsFastMath: boolean;
+  enableMpsPreferMetal: boolean;
+  mpsHighWatermarkRatio: string;
+};
+
+export type HostInfo = {
+  platform: NodeJS.Platform;
+  arch: NodeJS.Architecture;
+  isAppleSiliconMac: boolean;
+};
+
 export type CapabilityDto = {
   ffmpegAvailable: boolean;
   ffprobeAvailable: boolean;

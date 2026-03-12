@@ -12,6 +12,9 @@ from backend.gui_api.state import GuiApiState
 
 
 class _FakeState:
+    def __init__(self):
+        self.cancelled_job_id = None
+
     def capabilities(self):
         return CapabilityDto(
             ffmpegAvailable=True,
@@ -52,6 +55,7 @@ class _FakeState:
         }
 
     def cancel_job(self, job_id: str):
+        self.cancelled_job_id = job_id
         return None
 
     def download_artifact(self, artifact: str):
@@ -152,6 +156,19 @@ def test_download_endpoint_queues_artifact(monkeypatch):
             assert response.status_code == 200
             assert response.json()["artifact"] == "gvm"
             assert response.json()["status"] == "queued"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_cancel_endpoint_invokes_state(monkeypatch):
+    monkeypatch.setenv("CORRIDORKEY_GUI_API_TOKEN", "secret")
+    fake_state = _FakeState()
+    app.dependency_overrides[gui_state] = lambda: fake_state
+    try:
+        with TestClient(app) as client:
+            response = client.post("/jobs/job-42/cancel", headers={"Authorization": "Bearer secret"})
+            assert response.status_code == 200
+            assert fake_state.cancelled_job_id == "job-42"
     finally:
         app.dependency_overrides.clear()
 

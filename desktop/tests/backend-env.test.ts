@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildBackendEnv, isAppleSiliconMac } from "../src/main/backend-env";
+import { buildBackendEnv, defaultBackendLaunchConfig, isAppleSiliconMac } from "../src/main/backend-env";
 
 describe("backend-env", () => {
   it("enables MPS tuning defaults on Apple Silicon Macs", () => {
@@ -28,11 +28,17 @@ describe("backend-env", () => {
   });
 
   it("lets A/B tests disable the MPS tuning flags explicitly", () => {
-    const env = buildBackendEnv(8765, "token", {
-      baseEnv: {
+    const launchConfig = defaultBackendLaunchConfig(
+      {
         CORRIDORKEY_ENABLE_MPS_FAST_MATH: "0",
         CORRIDORKEY_ENABLE_MPS_PREFER_METAL: "0"
       },
+      "darwin",
+      "arm64"
+    );
+    const env = buildBackendEnv(8765, "token", {
+      baseEnv: {},
+      launchConfig,
       platform: "darwin",
       arch: "arm64"
     });

@@ -811,6 +811,7 @@ class CorridorKeyService:
         job: GPUJob | None = None,
         on_progress: Callable[[str, int, int], None] | None = None,
         on_warning: Callable[[str], None] | None = None,
+        on_status: Callable[[str], None] | None = None,
     ) -> None:
         """Run GVM auto alpha generation for a clip.
 
@@ -821,32 +822,57 @@ class CorridorKeyService:
             job: Optional GPUJob for cancel checking.
             on_progress: Progress callback (GVM is monolithic, reports start/end).
             on_warning: Warning callback.
+            on_status: Optional status label callback for UI phase text.
         """
         if clip.input_asset is None:
             raise CorridorKeyError(f"Clip '{clip.name}' missing input asset for GVM")
 
         t_start = time.monotonic()
+        if on_status:
+            on_status("Loading GVM model")
 
         with self._gpu_lock:
             gvm = self._get_gvm()
 
         alpha_dir = os.path.join(clip.root_path, "AlphaHint")
         os.makedirs(alpha_dir, exist_ok=True)
-
-        if on_progress:
-            on_progress(clip.name, 0, 1)
+        if on_status:
+            on_status("Preparing GVM inputs")
 
         # Check cancel before starting
         if job and job.is_cancelled:
             raise JobCancelledError(clip.name, 0)
 
-        # Per-batch progress callback — GVM iterates over frames internally
-        def _gvm_progress(batch_idx: int, total_batches: int) -> None:
+        def _format_eta(seconds: float) -> str:
+            if seconds <= 0:
+                return "0s"
+            minutes, secs = divmod(int(seconds), 60)
+            hours, minutes = divmod(minutes, 60)
+            if hours:
+                return f"{hours}h {minutes}m"
+            if minutes:
+                return f"{minutes}m {secs}s"
+            return f"{secs}s"
+
+        # Per-batch progress callback — batch size is forced to 1, so batches == frames here.
+        def _gvm_progress(frames_done: int, total_batches: int) -> None:
+            elapsed = max(time.monotonic() - t_start, 1e-6)
+            frames_per_second = frames_done / elapsed if frames_done > 0 else 0.0
+            remaining = max(total_batches - frames_done, 0)
+            eta = remaining / frames_per_second if frames_per_second > 0 else 0.0
+            status = (
+                f"GVM progress: {frames_done}/{total_batches} frames, "
+                f"{frames_per_second:.2f} fps, ETA {_format_eta(eta)}"
+            )
+            if on_status:
+                on_status(status)
             if on_progress:
-                on_progress(clip.name, batch_idx, total_batches)
+                on_progress(clip.name, frames_done, total_batches)
+            if frames_done in {1, total_batches} or (frames_done % 10 == 0):
+                logger.info("%s for '%s'", status, clip.name)
             # Check cancel between batches
             if job and job.is_cancelled:
-                raise JobCancelledError(clip.name, batch_idx)
+                raise JobCancelledError(clip.name, frames_done)
 
         try:
             gvm.process_sequence(
@@ -869,9 +895,6 @@ class CorridorKeyService:
 
         # Refresh alpha asset
         clip.alpha_asset = ClipAsset(alpha_dir, "sequence")
-
-        if on_progress:
-            on_progress(clip.name, 1, 1)
 
         # Transition RAW → READY
         try:

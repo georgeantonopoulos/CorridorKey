@@ -3,7 +3,13 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 import fs from "node:fs";
-import { buildBackendEnv } from "./backend-env";
+import {
+  buildBackendEnv,
+  defaultBackendLaunchConfig,
+  getBackendHostInfo,
+  type BackendHostInfo,
+  type BackendLaunchConfig
+} from "./backend-env";
 import { sendBackendStatus, type BackendStatus } from "./backend-status";
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -20,6 +26,8 @@ let backendStatus: BackendStatus = {
 
 const repoRoot = path.resolve(__dirname, "../../..");
 const preferredPython = path.join(repoRoot, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+const hostInfo: BackendHostInfo = getBackendHostInfo();
+let backendLaunchConfig: BackendLaunchConfig = defaultBackendLaunchConfig();
 
 async function probeBackend(url: string, token: string): Promise<boolean> {
   try {
@@ -38,7 +46,7 @@ async function startBackend(): Promise<void> {
   const port = 8765;
   const token = randomUUID();
   const url = `http://127.0.0.1:${port}`;
-  const env = buildBackendEnv(port, token);
+  const env = buildBackendEnv(port, token, { launchConfig: backendLaunchConfig });
   const pythonCommand = fs.existsSync(preferredPython) ? preferredPython : "python3";
 
   backendStatus = {
@@ -98,12 +106,42 @@ async function startBackend(): Promise<void> {
   };
 }
 
-function stopBackend(): void {
+async function stopBackend(): Promise<void> {
   if (!backendProc) {
     return;
   }
-  backendProc.kill();
+
+  const proc = backendProc;
   backendProc = null;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve();
+    };
+
+    proc.once("exit", finish);
+    proc.kill();
+    setTimeout(finish, 1500);
+  });
+}
+
+async function restartBackend(): Promise<BackendStatus> {
+  backendStatus = {
+    ...backendStatus,
+    status: "starting",
+    message: "Restarting Python GUI API..."
+  };
+  sendBackendStatus(mainWindow, backendStatus);
+  await stopBackend();
+  await startBackend();
+  sendBackendStatus(mainWindow, backendStatus);
+  return backendStatus;
 }
 
 async function createWindow(): Promise<void> {
@@ -149,8 +187,18 @@ ipcMain.handle("dialog:pick-inputs", async () => {
 });
 
 ipcMain.handle("backend:get-status", async () => backendStatus);
+ipcMain.handle("backend:get-launch-config", async () => backendLaunchConfig);
+ipcMain.handle("backend:update-launch-config", async (_event, nextConfig: BackendLaunchConfig) => {
+  backendLaunchConfig = {
+    ...backendLaunchConfig,
+    ...nextConfig
+  };
+  await restartBackend();
+  return backendLaunchConfig;
+});
 ipcMain.handle("shell:open-path", async (_event, targetPath: string) => shell.openPath(targetPath));
 ipcMain.handle("app:get-root", async () => repoRoot);
+ipcMain.handle("app:get-host-info", async () => hostInfo);
 
 app.whenReady().then(async () => {
   await startBackend();
@@ -159,11 +207,11 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    stopBackend();
+    void stopBackend();
     app.quit();
   }
 });
 
 app.on("before-quit", () => {
-  stopBackend();
+  void stopBackend();
 });
