@@ -186,34 +186,50 @@ class CorridorKeyService:
         return self._device
 
     def get_vram_info(self) -> dict[str, float]:
-        """Get GPU VRAM info in GB. Returns empty dict if not CUDA."""
+        """Get GPU memory info in GB. Supports CUDA and MPS."""
         try:
             import torch
 
-            if not torch.cuda.is_available():
-                return {}
-            props = torch.cuda.get_device_properties(0)
-            total_bytes = props.total_mem
-            reserved = torch.cuda.memory_reserved(0)
-            return {
-                "total": total_bytes / (1024**3),
-                "reserved": reserved / (1024**3),
-                "allocated": torch.cuda.memory_allocated(0) / (1024**3),
-                "free": (total_bytes - reserved) / (1024**3),
-                "name": torch.cuda.get_device_name(0),
-            }
+            if torch.cuda.is_available():
+                props = torch.cuda.get_device_properties(0)
+                total_bytes = props.total_mem
+                reserved = torch.cuda.memory_reserved(0)
+                return {
+                    "total": total_bytes / (1024**3),
+                    "reserved": reserved / (1024**3),
+                    "allocated": torch.cuda.memory_allocated(0) / (1024**3),
+                    "free": (total_bytes - reserved) / (1024**3),
+                    "name": torch.cuda.get_device_name(0),
+                }
+
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                # MPS uses unified memory — report system RAM as proxy
+                from device_utils import get_system_memory_gb
+
+                allocated = torch.mps.current_allocated_memory() / (1024**3)
+                total = get_system_memory_gb()
+                return {
+                    "total": total,
+                    "allocated": allocated,
+                    "free": total - allocated,
+                    "name": "Apple Silicon (MPS)",
+                }
+
+            return {}
         except Exception as e:
             logger.debug(f"VRAM query failed: {e}")
             return {}
 
     @staticmethod
     def _vram_allocated_mb() -> float:
-        """Return current VRAM allocated in MB, or 0 if unavailable."""
+        """Return current GPU memory allocated in MB, or 0 if unavailable."""
         try:
             import torch
 
             if torch.cuda.is_available():
                 return torch.cuda.memory_allocated(0) / (1024**2)
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                return torch.mps.current_allocated_memory() / (1024**2)
         except Exception:
             pass
         return 0.0
