@@ -9,6 +9,13 @@ type Props = {
   settings: SettingsState;
 };
 
+const viewModeLabels: Record<ViewMode, string> = {
+  source: "Source",
+  alpha_hint: "Alpha hint",
+  preview_result: "Preview",
+  saved_comp: "Comp"
+};
+
 const defaultFrameIndex = 0;
 
 export function FrameViewer({ clip, settings }: Props) {
@@ -67,9 +74,9 @@ export function FrameViewer({ clip, settings }: Props) {
       <div className="panel-header">
         <h2>Frame Viewer</h2>
         <div className="segmented">
-          {["source", "alpha_hint", "preview_result", "saved_comp"].map((mode) => (
-            <button key={mode} className={viewMode === mode ? "active" : ""} onClick={() => setViewMode(mode as ViewMode)}>
-              {mode.replaceAll("_", " ")}
+          {(Object.keys(viewModeLabels) as ViewMode[]).map((mode) => (
+            <button key={mode} className={viewMode === mode ? "active" : ""} onClick={() => setViewMode(mode)}>
+              {viewModeLabels[mode]}
             </button>
           ))}
         </div>
@@ -79,7 +86,7 @@ export function FrameViewer({ clip, settings }: Props) {
           imageSrc ? (
             <img src={imageSrc} alt={`${clip.name} frame ${frameIndex}`} className="viewer-image" />
           ) : (
-            <div className="viewer-placeholder">{previewError ?? "Select a clip to load frames."}</div>
+            <div className="viewer-placeholder">{previewError ?? "Loading…"}</div>
           )
         ) : (
           <div className="viewer-placeholder">Select a clip to inspect frames.</div>

@@ -8,6 +8,22 @@ type Props = {
   onOpenOutput: () => void;
 };
 
+function stagePillClass(state: string): string {
+  switch (state) {
+    case "READY":
+      return "state-pill state-pill-ready";
+    case "COMPLETE":
+      return "state-pill state-pill-complete";
+    case "ERROR":
+      return "state-pill state-pill-error";
+    case "EXTRACTING":
+    case "MASKED":
+      return "state-pill state-pill-warn";
+    default:
+      return "state-pill state-pill-emphasis";
+  }
+}
+
 export function WorkflowPanel({ clip, onRunAction, onOpenClip, onOpenOutput }: Props) {
   const workflow = summarizeWorkflow(clip);
   const primaryAction = workflow.primaryAction;
@@ -16,17 +32,19 @@ export function WorkflowPanel({ clip, onRunAction, onOpenClip, onOpenOutput }: P
     <section className="card workflow-card">
       <div className="workflow-hero">
         <div>
-          <p className="eyebrow">Workflow Guide</p>
+          <p className="eyebrow">Next step</p>
           <h2>{workflow.headline}</h2>
           <p className="workflow-copy">{workflow.description}</p>
         </div>
-        <span className="state-pill state-pill-emphasis">{workflow.stageLabel}</span>
+        <span className={clip ? stagePillClass(clip.state) : "state-pill state-pill-emphasis"}>
+          {workflow.stageLabel}
+        </span>
       </div>
 
       {clip ? (
         <div className="workflow-metadata">
           <div>
-            <span className="meta-label">Clip state</span>
+            <span className="meta-label">State</span>
             <strong>{formatClipState(clip.state)}</strong>
           </div>
           <div>
@@ -38,7 +56,7 @@ export function WorkflowPanel({ clip, onRunAction, onOpenClip, onOpenOutput }: P
             <strong>{clip.frameCount}</strong>
           </div>
           <div>
-            <span className="meta-label">Alpha frames</span>
+            <span className="meta-label">Alpha hints</span>
             <strong>{clip.alphaFrameCount}</strong>
           </div>
         </div>
@@ -50,7 +68,7 @@ export function WorkflowPanel({ clip, onRunAction, onOpenClip, onOpenOutput }: P
             {primaryAction.label}
           </button>
         ) : (
-          <div className="inline-note">No pipeline step is available yet for this clip.</div>
+          <span className="inline-note">No pipeline step available yet.</span>
         )}
         <div className="action-cluster">
           {workflow.secondaryActions.map((action) => (
@@ -60,35 +78,28 @@ export function WorkflowPanel({ clip, onRunAction, onOpenClip, onOpenOutput }: P
           ))}
           {clip ? (
             <>
-              <button type="button" onClick={onOpenClip}>
+              <button type="button" className="ghost-button" onClick={onOpenClip}>
                 Open clip folder
               </button>
-              <button type="button" onClick={onOpenOutput}>
-                Open output folder
+              <button type="button" className="ghost-button" onClick={onOpenOutput}>
+                Open output
               </button>
             </>
           ) : null}
         </div>
       </div>
 
-      <div className="issue-stack">
-        <div className="panel-header">
-          <h3>What needs attention</h3>
-        </div>
-        {workflow.issues.length ? (
-          workflow.issues.map((issue, index) => (
+      {workflow.issues.length > 0 ? (
+        <div className="issue-stack">
+          <h3 className="eyebrow" style={{ margin: 0 }}>Attention</h3>
+          {workflow.issues.map((issue, index) => (
             <div key={`${issue.code}-${index}`} className={`issue-card issue-${issue.severity}`}>
               <strong>{issue.message}</strong>
-              <span>{issue.path ?? issue.code}</span>
+              {issue.path ? <span>{issue.path}</span> : null}
             </div>
-          ))
-        ) : (
-          <div className="issue-card issue-info">
-            <strong>No blockers detected.</strong>
-            <span>The selected clip looks ready for its next workflow step.</span>
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

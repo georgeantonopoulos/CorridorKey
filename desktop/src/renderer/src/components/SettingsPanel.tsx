@@ -34,19 +34,15 @@ export function SettingsPanel({
   return (
     <div className="card settings-card">
       <div className="panel-header">
-        <div>
-          <p className="eyebrow">Recipe</p>
-          <h2>Inference Settings</h2>
-        </div>
+        <h2>Settings</h2>
       </div>
-      <p className="settings-hint">These controls affect previews and inference runs. Start with the defaults unless you know the plate needs special handling.</p>
 
       <div className="settings-group">
         <h3>Plate assumptions</h3>
         <label className="setting-row">
           <div>
             <span>Linear input</span>
-            <p>Enable this only when the incoming plate is already linear.</p>
+            <p>Enable only when the incoming plate is already linear.</p>
           </div>
           <input
             type="checkbox"
@@ -61,7 +57,7 @@ export function SettingsPanel({
         <label className="setting-row">
           <div>
             <span>Despill strength</span>
-            <p>Higher values remove more green contamination from the foreground.</p>
+            <p>Higher values remove more green contamination.</p>
           </div>
           <div className="setting-control">
             <input
@@ -78,7 +74,7 @@ export function SettingsPanel({
         <label className="setting-row">
           <div>
             <span>Auto despeckle</span>
-            <p>Removes tiny disconnected islands from the matte automatically.</p>
+            <p>Remove tiny disconnected matte islands.</p>
           </div>
           <input
             type="checkbox"
@@ -89,7 +85,7 @@ export function SettingsPanel({
         <label className="setting-row">
           <div>
             <span>Despeckle size</span>
-            <p>Maximum particle size to prune when auto despeckle is enabled.</p>
+            <p>Max particle size to prune.</p>
           </div>
           <input
             type="number"
@@ -105,7 +101,7 @@ export function SettingsPanel({
         <label className="setting-row">
           <div>
             <span>Refiner scale</span>
-            <p>Controls how aggressively the model leans into fine detail recovery.</p>
+            <p>Controls fine detail recovery aggressiveness.</p>
           </div>
           <input
             type="number"
@@ -119,12 +115,12 @@ export function SettingsPanel({
 
       {canShowMpsControls ? (
         <details className="advanced-panel">
-          <summary>Apple Silicon backend tuning</summary>
-          <p className="settings-hint">These toggles restart the Python backend and are only relevant on Apple Silicon Macs.</p>
+          <summary>Apple Silicon tuning</summary>
+          <p className="settings-hint">These toggles restart the Python backend. Only relevant on Apple Silicon.</p>
           <label className="setting-row">
             <div>
-              <span>Enable fast math</span>
-              <p>Lets PyTorch use faster but slightly less exact math on MPS.</p>
+              <span>Fast math</span>
+              <p>Faster but slightly less exact MPS math.</p>
             </div>
             <input
               type="checkbox"
@@ -135,7 +131,7 @@ export function SettingsPanel({
           <label className="setting-row">
             <div>
               <span>Prefer Metal kernels</span>
-              <p>Biases MPS workloads toward Metal kernels when available.</p>
+              <p>Bias MPS workloads toward Metal when available.</p>
             </div>
             <input
               type="checkbox"
@@ -146,17 +142,17 @@ export function SettingsPanel({
           <label className="setting-row">
             <div>
               <span>High watermark ratio</span>
-              <p>Optional override for the MPS memory allocator limit.</p>
+              <p>MPS memory allocator limit override.</p>
             </div>
             <input
               type="text"
-              placeholder="Optional, e.g. 0.0"
+              placeholder="e.g. 0.0"
               value={launchDraft.mpsHighWatermarkRatio}
               onChange={(event) => setLaunchDraft({ ...launchDraft, mpsHighWatermarkRatio: event.target.value })}
             />
           </label>
           <button type="button" disabled={isApplyDisabled} onClick={() => void onApplyBackendLaunchConfig(launchDraft)}>
-            Apply & Restart Backend
+            Apply &amp; restart backend
           </button>
         </details>
       ) : null}

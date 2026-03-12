@@ -9,39 +9,41 @@ type Props = {
 
 export function CapabilityBanner({ capabilities, downloads, backendMessage, onDownload }: Props) {
   if (!capabilities) {
-    return <div className="banner banner-muted">Waiting for backend capabilities… {backendMessage ?? ""}</div>;
+    return <div className="banner banner-muted">Connecting to backend… {backendMessage ?? ""}</div>;
   }
 
   const warnings = [...capabilities.warnings];
   if (!capabilities.ffmpegAvailable) {
-    warnings.push("FFmpeg is missing; video import and extraction are disabled.");
+    warnings.push("FFmpeg missing — video import disabled.");
   }
   if (!capabilities.torchCheckpointReady) {
-    warnings.push("CorridorKey checkpoint is missing.");
+    warnings.push("CorridorKey checkpoint missing.");
   }
+
   const gvmDownload = downloads.find((task) => task.artifact === "gvm") ?? null;
   const gvmDownloading = gvmDownload?.status === "queued" || gvmDownload?.status === "running";
   const gvmLabel = gvmDownloading
     ? `Downloading GVM (${gvmDownload?.completedSteps ?? 0}/${gvmDownload?.totalSteps ?? 0})`
-    : "Download GVM Weights";
-  const gvmSizeHint = gvmDownload?.totalBytes ? formatBytes(gvmDownload.totalBytes) : "6.48 GB";
+    : "Download GVM weights";
+  const gvmSizeHint = gvmDownload?.totalBytes ? formatBytes(gvmDownload.totalBytes) : "~6.5 GB";
   const gvmProgressHint =
     gvmDownload && gvmDownloading
-      ? `Progress: ${formatBytes(gvmDownload.completedBytes)} / ${formatBytes(gvmDownload.totalBytes)}. ${
-          gvmDownload.currentFile ? `Current file: ${gvmDownload.currentFile} (${formatBytes(gvmDownload.currentFileBytes)}).` : ""
+      ? `${formatBytes(gvmDownload.completedBytes)} / ${formatBytes(gvmDownload.totalBytes)}${
+          gvmDownload.currentFile ? ` — ${gvmDownload.currentFile}` : ""
         }`
-      : `GVM download size: about ${gvmSizeHint}.`;
+      : `GVM download: ${gvmSizeHint}`;
 
   return (
     <div className={`banner ${warnings.length ? "banner-warn" : "banner-good"}`}>
-      <strong>Device:</strong> {capabilities.detectedDevice} | <strong>Backend:</strong> {capabilities.detectedBackend}
+      <strong>{capabilities.detectedDevice}</strong>
       <span className="banner-spacer" />
-      {warnings.length ? warnings.join(" ") : "All core capabilities look ready."}
+      <span>{capabilities.detectedBackend}</span>
+      <span className="banner-spacer" />
+      {warnings.length ? warnings.join(" ") : "All systems ready."}
       {!capabilities.gvmWeightsReady ? (
         <>
           <span className="banner-spacer" />
           <span>{gvmProgressHint}</span>
-          <span className="banner-spacer" />
           <button type="button" disabled={gvmDownloading} onClick={() => onDownload("gvm")}>
             {gvmLabel}
           </button>

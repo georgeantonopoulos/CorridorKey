@@ -20,8 +20,8 @@ export function ImportReviewModal({ draft, busy, onClose, onToggleCopySource, on
       <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="import-review-title">
         <div className="modal-header">
           <div>
-            <p className="eyebrow">Import Review</p>
-            <h2 id="import-review-title">Choose how CorridorKey should stage these files</h2>
+            <p className="eyebrow">Import review</p>
+            <h2 id="import-review-title">How should CorridorKey stage these files?</h2>
           </div>
           <button type="button" className="ghost-button" onClick={onClose} disabled={busy}>
             Close
@@ -56,8 +56,8 @@ export function ImportReviewModal({ draft, busy, onClose, onToggleCopySource, on
                     onChange={() => onToggleCopySource(false)}
                   />
                   <div>
-                    <strong>Reference original video in place</strong>
-                    <p>Recommended for iteration. The project keeps a pointer to the source file instead of duplicating it.</p>
+                    <strong>Reference in place</strong>
+                    <p>Recommended. Keeps a pointer to the source file without duplicating it.</p>
                   </div>
                 </label>
                 <label className={`choice-card ${draft.copySource ? "selected" : ""}`}>
@@ -68,21 +68,20 @@ export function ImportReviewModal({ draft, busy, onClose, onToggleCopySource, on
                     onChange={() => onToggleCopySource(true)}
                   />
                   <div>
-                    <strong>Copy video into the managed project</strong>
-                    <p>Use this when you need a fully self-contained project folder that can move with the source media.</p>
+                    <strong>Copy into project</strong>
+                    <p>Creates a self-contained project folder that can be moved with source media.</p>
                   </div>
                 </label>
               </div>
             ) : (
-              <p className="inline-note">No loose video files were selected, so there is no in-place video reference option for this import.</p>
+              <p className="inline-note">No video files selected — image sequences will be normalized into the managed frame folder.</p>
             )}
 
             {draft.managedCount > 0 ? (
               <div className="import-note">
-                <strong>Sequence note</strong>
                 <p>
-                  Image sequences and folders are still normalized into each clip&apos;s managed <code>Frames/</code> folder today. That gives
-                  CorridorKey a stable place to scrub, validate, and write outputs against.
+                  Image sequences and folders are normalized into each clip&apos;s <code>Frames/</code> folder for
+                  reliable scrubbing and inference.
                 </p>
               </div>
             ) : null}
@@ -93,8 +92,8 @@ export function ImportReviewModal({ draft, busy, onClose, onToggleCopySource, on
           <button type="button" className="ghost-button" onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button type="button" onClick={onConfirm} disabled={busy}>
-            {busy ? "Importing..." : "Import into CorridorKey"}
+          <button type="button" className="primary-button" onClick={onConfirm} disabled={busy}>
+            {busy ? "Importing…" : "Import"}
           </button>
         </div>
       </div>
