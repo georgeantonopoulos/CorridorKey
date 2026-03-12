@@ -60,3 +60,4 @@ gvm_core/weights/*
 !gvm_core/weights/.gitkeep
 
 site
+CLAUDE.md
