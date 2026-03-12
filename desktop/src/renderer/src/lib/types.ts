@@ -105,3 +105,8 @@ export type SnapshotDto = {
   downloads: DownloadTaskDto[];
   logs: string[];
 };
+
+export type ImportResponse = {
+  project: ProjectDto;
+  issues: ValidationIssueDto[];
+};

@@ -37,7 +37,7 @@ describe("SettingsPanel", () => {
       />
     );
 
-    expect(screen.getByText("Apple Silicon")).toBeInTheDocument();
+    expect(screen.getByText("Apple Silicon backend tuning")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: /Enable fast math/i }));
     fireEvent.click(screen.getByRole("button", { name: "Apply & Restart Backend" }));
     expect(onApply).toHaveBeenCalled();

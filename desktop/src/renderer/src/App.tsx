@@ -3,9 +3,11 @@ import { CapabilityBanner } from "./components/CapabilityBanner";
 import { ClipTable } from "./components/ClipTable";
 import { ErrorDrawer } from "./components/ErrorDrawer";
 import { FrameViewer } from "./components/FrameViewer";
+import { ImportReviewModal } from "./components/ImportReviewModal";
 import { ProjectRail } from "./components/ProjectRail";
 import { QueuePanel } from "./components/QueuePanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { WorkflowPanel } from "./components/WorkflowPanel";
 import {
   cancelJob,
   connectSnapshots,
@@ -16,6 +18,7 @@ import {
   queueClipAction,
   refreshProject
 } from "./lib/api";
+import { buildImportReview, type ClipActionKind, type ImportReview } from "./lib/workflow";
 import type {
   BackendLaunchConfig,
   BackendStatus,
@@ -48,6 +51,8 @@ export function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsState>(defaultSettings);
+  const [importReview, setImportReview] = useState<ImportReview | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   useEffect(() => {
     window.corridorDesktop.getBackendStatus().then(setBackendStatus);
@@ -94,24 +99,55 @@ export function App() {
     [selectedProject, selectedClipId]
   );
 
+  useEffect(() => {
+    if (!selectedProject) {
+      if (selectedClipId) {
+        setSelectedClipId(null);
+      }
+      return;
+    }
+
+    if (!selectedClipId || !selectedProject.clips.some((clip) => clip.id === selectedClipId)) {
+      setSelectedClipId(selectedProject.clips[0]?.id ?? null);
+    }
+  }, [selectedClipId, selectedProject]);
+
   async function handleImport() {
     try {
       const result = await window.corridorDesktop.pickInputs();
       if (result.canceled || !result.filePaths.length) {
         return;
       }
-      await importSources(result.filePaths, true);
-      const refreshed = await fetchProjects();
-      setProjects(refreshed);
-      if (refreshed[0]) {
-        setSelectedProjectId(refreshed[0].id);
-      }
+      setImportReview(buildImportReview(result.filePaths));
     } catch (error) {
       setLogs((items) => [String(error), ...items].slice(0, 30));
     }
   }
 
-  async function handleQueue(action: "extract" | "gvm" | "videomama" | "inference") {
+  async function confirmImport() {
+    if (!importReview) {
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const response = await importSources(importReview.paths, importReview.copySource);
+      const refreshed = await fetchProjects();
+      setProjects(refreshed);
+      setSelectedProjectId(response.project.id);
+      setSelectedClipId(response.project.clips[0]?.id ?? null);
+      if (response.issues.length) {
+        setLogs((items) => response.issues.map((issue) => issue.message).concat(items).slice(0, 30));
+      }
+      setImportReview(null);
+    } catch (error) {
+      setLogs((items) => [String(error), ...items].slice(0, 30));
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  async function handleQueue(action: ClipActionKind) {
     if (!selectedClip) {
       return;
     }
@@ -162,37 +198,25 @@ export function App() {
           onImport={handleImport}
         />
         <main className="main-column">
+          <WorkflowPanel
+            clip={selectedClip}
+            onRunAction={(action) => void handleQueue(action)}
+            onOpenClip={() => {
+              if (selectedClip) {
+                void window.corridorDesktop.openPath(selectedClip.rootPath);
+              }
+            }}
+            onOpenOutput={() => {
+              if (selectedClip) {
+                void window.corridorDesktop.openPath(`${selectedClip.rootPath}/Output`);
+              }
+            }}
+          />
           <ClipTable
             clips={selectedProject?.clips ?? []}
             selectedClipId={selectedClip?.id ?? null}
             onSelectClip={setSelectedClipId}
           />
-          <div className="action-row">
-            <button disabled={!selectedClip || !selectedClip.availableActions.includes("extract")} onClick={() => void handleQueue("extract")}>
-              Extract Frames
-            </button>
-            <button disabled={!selectedClip || !selectedClip.availableActions.includes("gvm")} onClick={() => void handleQueue("gvm")}>
-              Run GVM
-            </button>
-            <button
-              disabled={!selectedClip || !selectedClip.availableActions.includes("videomama")}
-              onClick={() => void handleQueue("videomama")}
-            >
-              Run VideoMaMa
-            </button>
-            <button
-              disabled={!selectedClip || !selectedClip.availableActions.includes("inference")}
-              onClick={() => void handleQueue("inference")}
-            >
-              Run Inference
-            </button>
-            {selectedClip ? (
-              <>
-                <button onClick={() => void window.corridorDesktop.openPath(selectedClip.rootPath)}>Open Clip</button>
-                <button onClick={() => void window.corridorDesktop.openPath(`${selectedClip.rootPath}/Output`)}>Open Output</button>
-              </>
-            ) : null}
-          </div>
           <FrameViewer clip={selectedClip} settings={settings} />
         </main>
         <aside className="rail rail-right">
@@ -208,6 +232,22 @@ export function App() {
           <ErrorDrawer items={logs} />
         </aside>
       </div>
+      <ImportReviewModal
+        draft={importReview}
+        busy={isImporting}
+        onClose={() => setImportReview(null)}
+        onToggleCopySource={(copySource) =>
+          setImportReview((current) =>
+            current
+              ? {
+                  ...current,
+                  copySource
+                }
+              : current
+          )
+        }
+        onConfirm={() => void confirmImport()}
+      />
     </div>
   );
 }

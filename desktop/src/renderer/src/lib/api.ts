@@ -1,4 +1,4 @@
-import type { DownloadTaskDto, SettingsState, SnapshotDto } from "./types";
+import type { DownloadTaskDto, ImportResponse, SettingsState, SnapshotDto } from "./types";
 
 async function authedFetch(pathname: string, init: RequestInit = {}): Promise<Response> {
   const backend = await window.corridorDesktop.getBackendStatus();
@@ -34,7 +34,7 @@ export async function fetchProjects() {
   return response.json();
 }
 
-export async function importSources(paths: string[], copySource = true) {
+export async function importSources(paths: string[], copySource = true): Promise<ImportResponse> {
   const response = await authedFetch("/projects/import", {
     method: "POST",
     body: JSON.stringify({ paths, copySource })
