@@ -48,7 +48,7 @@ export function defaultBackendLaunchConfig(
   return {
     enableMpsFastMath: baseEnv.CORRIDORKEY_ENABLE_MPS_FAST_MATH !== "0",
     enableMpsPreferMetal: baseEnv.CORRIDORKEY_ENABLE_MPS_PREFER_METAL !== "0",
-    mpsHighWatermarkRatio: baseEnv.CORRIDORKEY_MPS_HIGH_WATERMARK_RATIO ?? ""
+    mpsHighWatermarkRatio: baseEnv.CORRIDORKEY_MPS_HIGH_WATERMARK_RATIO ?? "0.0"
   };
 }
 

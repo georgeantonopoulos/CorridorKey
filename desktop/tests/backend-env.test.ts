@@ -46,4 +46,24 @@ describe("backend-env", () => {
     expect(env.PYTORCH_MPS_FAST_MATH).toBeUndefined();
     expect(env.PYTORCH_MPS_PREFER_METAL).toBeUndefined();
   });
+
+  it("defaults PYTORCH_MPS_HIGH_WATERMARK_RATIO to 0.0 on Apple Silicon", () => {
+    const env = buildBackendEnv(8765, "token", {
+      baseEnv: {},
+      platform: "darwin",
+      arch: "arm64"
+    });
+
+    expect(env.PYTORCH_MPS_HIGH_WATERMARK_RATIO).toBe("0.0");
+  });
+
+  it("allows overriding PYTORCH_MPS_HIGH_WATERMARK_RATIO via env var", () => {
+    const env = buildBackendEnv(8765, "token", {
+      baseEnv: { CORRIDORKEY_MPS_HIGH_WATERMARK_RATIO: "0.7" },
+      platform: "darwin",
+      arch: "arm64"
+    });
+
+    expect(env.PYTORCH_MPS_HIGH_WATERMARK_RATIO).toBe("0.7");
+  });
 });
