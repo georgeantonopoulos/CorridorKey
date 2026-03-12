@@ -230,9 +230,7 @@ def create_engine(
         from corridorkey_mlx import CorridorKeyMLXEngine  # type: ignore[import-not-found]
 
         effective_img_size = img_size or DEFAULT_IMG_SIZE
-        raw_engine = CorridorKeyMLXEngine(
-            str(ckpt), img_size=effective_img_size, tile_size=tile_size, overlap=overlap
-        )
+        raw_engine = CorridorKeyMLXEngine(str(ckpt), img_size=effective_img_size, tile_size=tile_size, overlap=overlap)
         mode = f"tiled (tile={tile_size}, overlap={overlap})" if tile_size else "full-frame"
         logger.info("MLX engine loaded: %s [%s]", ckpt.name, mode)
         return _MLXEngineAdapter(raw_engine)
