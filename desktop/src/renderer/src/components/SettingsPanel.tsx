@@ -24,7 +24,8 @@ export function SettingsPanel({
     setLaunchDraft(backendLaunchConfig);
   }, [backendLaunchConfig]);
 
-  const canShowMpsControls = hostInfo?.isAppleSiliconMac && launchDraft;
+  const canShowAppleSiliconControls = hostInfo?.isAppleSiliconMac && launchDraft;
+  const isTorchBackend = launchDraft?.backendMode === "torch";
   const isApplyDisabled =
     !launchDraft ||
     !backendLaunchConfig ||
@@ -135,44 +136,76 @@ export function SettingsPanel({
         </label>
       </div>
 
-      {canShowMpsControls ? (
+      {canShowAppleSiliconControls ? (
         <details className="advanced-panel">
-          <summary>Apple Silicon tuning</summary>
-          <p className="settings-hint">These toggles restart the Python backend. Only relevant on Apple Silicon.</p>
+          <summary>Apple Silicon backend</summary>
+          <p className="settings-hint">
+            Choose between Torch + MPS and MLX. Changes here restart the Python backend.
+          </p>
           <label className="setting-row">
             <div>
-              <span>Fast math</span>
-              <p>Faster but slightly less exact MPS math.</p>
+              <span>Backend engine</span>
+              <p>
+                Torch uses PyTorch + MPS. MLX uses the native Apple Silicon path when the MLX package and
+                weights are present.
+              </p>
             </div>
-            <input
-              type="checkbox"
-              checked={launchDraft.enableMpsFastMath}
-              onChange={(event) => setLaunchDraft({ ...launchDraft, enableMpsFastMath: event.target.checked })}
-            />
+            <select
+              aria-label="Backend engine"
+              value={launchDraft.backendMode}
+              onChange={(event) =>
+                setLaunchDraft({
+                  ...launchDraft,
+                  backendMode: event.target.value as "torch" | "mlx"
+                })
+              }
+            >
+              <option value="torch">Torch + MPS</option>
+              <option value="mlx">MLX</option>
+            </select>
           </label>
-          <label className="setting-row">
-            <div>
-              <span>Prefer Metal kernels</span>
-              <p>Bias MPS workloads toward Metal when available.</p>
-            </div>
-            <input
-              type="checkbox"
-              checked={launchDraft.enableMpsPreferMetal}
-              onChange={(event) => setLaunchDraft({ ...launchDraft, enableMpsPreferMetal: event.target.checked })}
-            />
-          </label>
-          <label className="setting-row">
-            <div>
-              <span>High watermark ratio</span>
-              <p>MPS memory allocator limit override.</p>
-            </div>
-            <input
-              type="text"
-              placeholder="e.g. 0.0"
-              value={launchDraft.mpsHighWatermarkRatio}
-              onChange={(event) => setLaunchDraft({ ...launchDraft, mpsHighWatermarkRatio: event.target.value })}
-            />
-          </label>
+          {isTorchBackend ? (
+            <>
+              <label className="setting-row">
+                <div>
+                  <span>Fast math</span>
+                  <p>Faster but slightly less exact MPS math.</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={launchDraft.enableMpsFastMath}
+                  onChange={(event) => setLaunchDraft({ ...launchDraft, enableMpsFastMath: event.target.checked })}
+                />
+              </label>
+              <label className="setting-row">
+                <div>
+                  <span>Prefer Metal kernels</span>
+                  <p>Bias MPS workloads toward Metal when available.</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={launchDraft.enableMpsPreferMetal}
+                  onChange={(event) => setLaunchDraft({ ...launchDraft, enableMpsPreferMetal: event.target.checked })}
+                />
+              </label>
+              <label className="setting-row">
+                <div>
+                  <span>High watermark ratio</span>
+                  <p>MPS memory allocator limit override.</p>
+                </div>
+                <input
+                  type="text"
+                  placeholder="e.g. 0.0"
+                  value={launchDraft.mpsHighWatermarkRatio}
+                  onChange={(event) => setLaunchDraft({ ...launchDraft, mpsHighWatermarkRatio: event.target.value })}
+                />
+              </label>
+            </>
+          ) : (
+            <p className="settings-hint">
+              MLX bypasses the PyTorch MPS allocator, so the MPS tuning controls are hidden while MLX is selected.
+            </p>
+          )}
           <button type="button" disabled={isApplyDisabled} onClick={() => void onApplyBackendLaunchConfig(launchDraft)}>
             Apply &amp; restart backend
           </button>

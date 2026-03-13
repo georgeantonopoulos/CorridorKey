@@ -6,6 +6,7 @@ export type BackendStatus = {
 };
 
 export type BackendLaunchConfig = {
+  backendMode: "torch" | "mlx";
   enableMpsFastMath: boolean;
   enableMpsPreferMetal: boolean;
   mpsHighWatermarkRatio: string;

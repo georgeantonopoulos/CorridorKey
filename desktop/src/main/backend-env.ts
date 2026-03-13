@@ -1,4 +1,7 @@
+export type AppleSiliconBackendMode = "torch" | "mlx";
+
 export type BackendLaunchConfig = {
+  backendMode: AppleSiliconBackendMode;
   enableMpsFastMath: boolean;
   enableMpsPreferMetal: boolean;
   mpsHighWatermarkRatio: string;
@@ -39,6 +42,7 @@ export function defaultBackendLaunchConfig(
 ): BackendLaunchConfig {
   if (!isAppleSiliconMac(platform, arch)) {
     return {
+      backendMode: "torch",
       enableMpsFastMath: false,
       enableMpsPreferMetal: false,
       mpsHighWatermarkRatio: ""
@@ -46,6 +50,7 @@ export function defaultBackendLaunchConfig(
   }
 
   return {
+    backendMode: baseEnv.CORRIDORKEY_BACKEND === "mlx" ? "mlx" : "torch",
     enableMpsFastMath: baseEnv.CORRIDORKEY_ENABLE_MPS_FAST_MATH !== "0",
     enableMpsPreferMetal: baseEnv.CORRIDORKEY_ENABLE_MPS_PREFER_METAL !== "0",
     mpsHighWatermarkRatio: baseEnv.CORRIDORKEY_MPS_HIGH_WATERMARK_RATIO ?? "0.0"
@@ -73,26 +78,21 @@ export function buildBackendEnv(port: number, token: string, options: BackendEnv
     return env;
   }
 
-  // Force Torch backend on Apple Silicon — MLX path is unstable and
-  // the MPS optimizations (cache clearing, auto-scaling) only apply to Torch.
-  // Users can still override via CORRIDORKEY_BACKEND env var.
-  if (!env.CORRIDORKEY_BACKEND) {
-    env.CORRIDORKEY_BACKEND = "torch";
-  }
+  env.CORRIDORKEY_BACKEND = launchConfig.backendMode;
 
-  if (launchConfig.enableMpsFastMath) {
+  if (launchConfig.backendMode === "torch" && launchConfig.enableMpsFastMath) {
     env.PYTORCH_MPS_FAST_MATH = "1";
   } else {
     delete env.PYTORCH_MPS_FAST_MATH;
   }
 
-  if (launchConfig.enableMpsPreferMetal) {
+  if (launchConfig.backendMode === "torch" && launchConfig.enableMpsPreferMetal) {
     env.PYTORCH_MPS_PREFER_METAL = "1";
   } else {
     delete env.PYTORCH_MPS_PREFER_METAL;
   }
 
-  if (launchConfig.mpsHighWatermarkRatio.trim()) {
+  if (launchConfig.backendMode === "torch" && launchConfig.mpsHighWatermarkRatio.trim()) {
     env.PYTORCH_MPS_HIGH_WATERMARK_RATIO = launchConfig.mpsHighWatermarkRatio.trim();
   } else {
     delete env.PYTORCH_MPS_HIGH_WATERMARK_RATIO;

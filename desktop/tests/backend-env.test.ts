@@ -11,6 +11,7 @@ describe("backend-env", () => {
     });
 
     expect(isAppleSiliconMac("darwin", "arm64")).toBe(true);
+    expect(env.CORRIDORKEY_BACKEND).toBe("torch");
     expect(env.PYTORCH_MPS_FAST_MATH).toBe("1");
     expect(env.PYTORCH_MPS_PREFER_METAL).toBe("1");
   });
@@ -30,6 +31,7 @@ describe("backend-env", () => {
   it("lets A/B tests disable the MPS tuning flags explicitly", () => {
     const launchConfig = defaultBackendLaunchConfig(
       {
+        CORRIDORKEY_BACKEND: "torch",
         CORRIDORKEY_ENABLE_MPS_FAST_MATH: "0",
         CORRIDORKEY_ENABLE_MPS_PREFER_METAL: "0"
       },
@@ -65,5 +67,24 @@ describe("backend-env", () => {
     });
 
     expect(env.PYTORCH_MPS_HIGH_WATERMARK_RATIO).toBe("0.7");
+  });
+
+  it("lets Apple Silicon users select the MLX backend explicitly", () => {
+    const env = buildBackendEnv(8765, "token", {
+      baseEnv: {},
+      launchConfig: {
+        backendMode: "mlx",
+        enableMpsFastMath: true,
+        enableMpsPreferMetal: true,
+        mpsHighWatermarkRatio: "0.0"
+      },
+      platform: "darwin",
+      arch: "arm64"
+    });
+
+    expect(env.CORRIDORKEY_BACKEND).toBe("mlx");
+    expect(env.PYTORCH_MPS_FAST_MATH).toBeUndefined();
+    expect(env.PYTORCH_MPS_PREFER_METAL).toBeUndefined();
+    expect(env.PYTORCH_MPS_HIGH_WATERMARK_RATIO).toBeUndefined();
   });
 });
