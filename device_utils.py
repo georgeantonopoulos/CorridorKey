@@ -99,11 +99,13 @@ def get_system_memory_gb() -> float:
     return 16.0
 
 
-# Resolution thresholds: (min_memory_gb, img_size)
+# Resolution thresholds for MPS: (min_memory_gb, img_size)
 # Evaluated top-down; first match wins.
+# MPS lacks FlashAttention so ViT attention cost is quadratic in spatial tokens.
+# 2048 is ~16× slower than 1024 — reserve it for explicit user override only.
+# Users who want 2048 on MPS can pass --img-size 2048.
 _MPS_RESOLUTION_TIERS = [
-    (24.0, 2048),
-    (12.0, 1536),
+    (32.0, 1536),
     (0.0, 1024),
 ]
 

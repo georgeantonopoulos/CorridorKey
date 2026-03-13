@@ -73,6 +73,13 @@ export function buildBackendEnv(port: number, token: string, options: BackendEnv
     return env;
   }
 
+  // Force Torch backend on Apple Silicon — MLX path is unstable and
+  // the MPS optimizations (cache clearing, auto-scaling) only apply to Torch.
+  // Users can still override via CORRIDORKEY_BACKEND env var.
+  if (!env.CORRIDORKEY_BACKEND) {
+    env.CORRIDORKEY_BACKEND = "torch";
+  }
+
   if (launchConfig.enableMpsFastMath) {
     env.PYTORCH_MPS_FAST_MATH = "1";
   } else {

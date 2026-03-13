@@ -36,7 +36,8 @@ const defaultSettings: SettingsState = {
   despillStrength: 0.5,
   autoDespeckle: true,
   despeckleSize: 400,
-  refinerScale: 1.0
+  refinerScale: 1.0,
+  imgSize: "auto"
 };
 
 export function App() {

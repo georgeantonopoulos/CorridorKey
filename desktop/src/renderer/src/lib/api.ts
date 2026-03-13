@@ -1,5 +1,20 @@
 import type { DownloadTaskDto, ImportResponse, SettingsState, SnapshotDto } from "./types";
 
+function serializeSettings(settings?: SettingsState) {
+  if (!settings) {
+    return undefined;
+  }
+
+  return {
+    input_is_linear: settings.inputIsLinear,
+    despill_strength: settings.despillStrength,
+    auto_despeckle: settings.autoDespeckle,
+    despeckle_size: settings.despeckleSize,
+    refiner_scale: settings.refinerScale,
+    img_size: settings.imgSize === "auto" ? null : settings.imgSize
+  };
+}
+
 async function authedFetch(pathname: string, init: RequestInit = {}): Promise<Response> {
   const backend = await window.corridorDesktop.getBackendStatus();
   if (!backend.url || !backend.authToken) {
@@ -59,7 +74,7 @@ export async function refreshProject(projectId: string) {
 export async function queueClipAction(clipId: string, action: "extract" | "gvm" | "videomama" | "inference", settings?: SettingsState) {
   const response = await authedFetch(`/clips/${clipId}/${action}`, {
     method: "POST",
-    body: JSON.stringify({ settings })
+    body: JSON.stringify({ settings: serializeSettings(settings) })
   });
   if (!response.ok) {
     const text = await response.text();
@@ -93,7 +108,7 @@ export async function previewFrame(clipId: string, frameIndex: number, settings:
     method: "POST",
     body: JSON.stringify({
       frameIndex,
-      settings
+      settings: serializeSettings(settings)
     })
   });
   if (!response.ok) {

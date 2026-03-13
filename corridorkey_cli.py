@@ -135,6 +135,7 @@ def _prompt_inference_settings(
     default_despeckle: bool | None = None,
     default_despeckle_size: int | None = None,
     default_refiner: float | None = None,
+    default_img_size: int | None = None,
 ) -> InferenceSettings:
     """Interactively prompt for inference settings, skipping any pre-filled values."""
     console.print(Panel("Inference Settings", style="bold cyan"))
@@ -193,6 +194,7 @@ def _prompt_inference_settings(
         auto_despeckle=auto_despeckle,
         despeckle_size=despeckle_size,
         refiner_scale=refiner_scale,
+        img_size=default_img_size,
     )
 
 
@@ -267,6 +269,10 @@ def run_inference_cmd(
         Optional[float],
         typer.Option("--refiner", help="Refiner strength multiplier (default: prompt)"),
     ] = None,
+    img_size: Annotated[
+        Optional[int],
+        typer.Option("--img-size", help="Override inference resolution: 1024, 1536, or 2048"),
+    ] = None,
 ) -> None:
     """Run CorridorKey inference on clips with Input + AlphaHint.
 
@@ -274,6 +280,9 @@ def run_inference_cmd(
     prompt interactively.
     """
     clips = scan_clips()
+
+    if img_size is not None and img_size not in {1024, 1536, 2048}:
+        raise typer.BadParameter("--img-size must be one of 1024, 1536, or 2048")
 
     # despeckle_size excluded — sensible default even in headless mode
     required_flags_set = all(v is not None for v in [linear, despill, despeckle, refiner])
@@ -286,6 +295,7 @@ def run_inference_cmd(
             auto_despeckle=despeckle,
             despeckle_size=despeckle_size if despeckle_size is not None else 400,
             refiner_scale=refiner,
+            img_size=img_size,
         )
     else:
         settings = _prompt_inference_settings(
@@ -294,6 +304,7 @@ def run_inference_cmd(
             default_despeckle=despeckle,
             default_despeckle_size=despeckle_size,
             default_refiner=refiner,
+            default_img_size=img_size,
         )
 
     with ProgressContext() as ctx_progress:

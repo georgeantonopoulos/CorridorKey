@@ -100,6 +100,28 @@ export function SettingsPanel({
         <h3>Detail recovery</h3>
         <label className="setting-row">
           <div>
+            <span>Output resolution</span>
+            <p>Auto uses the recommended engine size for the current device; higher values recover more detail.</p>
+          </div>
+          <select
+            value={String(settings.imgSize)}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              onChange({
+                ...settings,
+                imgSize:
+                  nextValue === "auto" ? "auto" : (Number(nextValue) as 1024 | 1536 | 2048)
+              });
+            }}
+          >
+            <option value="auto">Auto (recommended)</option>
+            <option value="1024">1024</option>
+            <option value="1536">1536</option>
+            <option value="2048">2048</option>
+          </select>
+        </label>
+        <label className="setting-row">
+          <div>
             <span>Refiner scale</span>
             <p>Controls fine detail recovery aggressiveness.</p>
           </div>

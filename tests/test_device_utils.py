@@ -194,14 +194,14 @@ class TestRecommendMpsImgSize:
     def test_8gb_returns_1024(self):
         assert recommend_mps_img_size(system_memory_gb=8.0) == 1024
 
-    def test_16gb_returns_1536(self):
-        assert recommend_mps_img_size(system_memory_gb=16.0) == 1536
+    def test_16gb_returns_1024(self):
+        assert recommend_mps_img_size(system_memory_gb=16.0) == 1024
 
-    def test_32gb_returns_2048(self):
-        assert recommend_mps_img_size(system_memory_gb=32.0) == 2048
+    def test_32gb_returns_1536(self):
+        assert recommend_mps_img_size(system_memory_gb=32.0) == 1536
 
-    def test_64gb_returns_2048(self):
-        assert recommend_mps_img_size(system_memory_gb=64.0) == 2048
+    def test_64gb_returns_1536(self):
+        assert recommend_mps_img_size(system_memory_gb=64.0) == 1536
 
     def test_explicit_override_takes_precedence(self):
         """If user provides an explicit img_size, return it unchanged."""

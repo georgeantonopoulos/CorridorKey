@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -9,7 +10,7 @@ import pytest
 
 from backend.errors import JobCancelledError
 from backend.job_queue import GPUJob, JobType
-from backend.service import CorridorKeyService
+from backend.service import CorridorKeyService, InferenceParams
 
 
 def make_clip(tmp_path: Path):
@@ -74,3 +75,56 @@ def test_run_gvm_cancels_after_progress_callback_requests_cancel(tmp_path):
 
     with pytest.raises(JobCancelledError, match="job cancelled"):
         service.run_gvm(clip, job=job, on_progress=on_progress)
+
+
+def test_inference_params_accepts_desktop_camel_case_keys():
+    params = InferenceParams.from_dict(
+        {
+            "inputIsLinear": True,
+            "despillStrength": 0.7,
+            "autoDespeckle": False,
+            "despeckleSize": 256,
+            "refinerScale": 1.2,
+            "imgSize": 1536,
+        }
+    )
+
+    assert params.input_is_linear is True
+    assert params.despill_strength == 0.7
+    assert params.auto_despeckle is False
+    assert params.despeckle_size == 256
+    assert params.refiner_scale == 1.2
+    assert params.img_size == 1536
+
+
+def test_get_engine_reloads_when_img_size_changes(tmp_path):
+    service = CorridorKeyService()
+    service._device = "cpu"
+    created_sizes: list[int] = []
+    offloaded_sizes: list[int] = []
+
+    class DummyEngine:
+        def __init__(self, checkpoint_path: str, device: str, img_size: int):
+            self.checkpoint_path = checkpoint_path
+            self.device = device
+            self.img_size = img_size
+            created_sizes.append(img_size)
+
+        def cpu(self):
+            offloaded_sizes.append(self.img_size)
+
+    ckpt = tmp_path / "model.pth"
+    ckpt.write_text("weights")
+
+    with (
+        mock.patch("backend.service.glob_module.glob", return_value=[str(ckpt)]),
+        mock.patch("CorridorKeyModule.inference_engine.CorridorKeyEngine", DummyEngine),
+    ):
+        first = service._get_engine()
+        second = service._get_engine(2048)
+        third = service._get_engine(1536)
+
+    assert first is second
+    assert third is not first
+    assert created_sizes == [2048, 1536]
+    assert offloaded_sizes == [2048]

@@ -96,6 +96,7 @@ export type SettingsState = {
   autoDespeckle: boolean;
   despeckleSize: number;
   refinerScale: number;
+  imgSize: "auto" | 1024 | 1536 | 2048;
 };
 
 export type SnapshotDto = {

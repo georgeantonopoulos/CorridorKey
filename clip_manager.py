@@ -37,6 +37,7 @@ class InferenceSettings:
     auto_despeckle: bool = True
     despeckle_size: int = 400
     refiner_scale: float = 1.0
+    img_size: int | None = None
 
 
 # Core Paths
@@ -562,7 +563,7 @@ def run_inference(
         device = resolve_device()
     from CorridorKeyModule.backend import create_engine
 
-    engine = create_engine(backend=backend, device=device)
+    engine = create_engine(backend=backend, device=device, img_size=settings.img_size)
 
     for clip in ready_clips:
         logger.info(f"Running Inference on: {clip.name}")
@@ -895,6 +896,13 @@ if __name__ == "__main__":
         default=None,
         help="Limit number of frames to process per clip (e.g. 1 for first frame only)",
     )
+    parser.add_argument(
+        "--img-size",
+        type=int,
+        choices=[1024, 1536, 2048],
+        default=None,
+        help="Override inference resolution (default: auto on MPS, else 2048)",
+    )
 
     args = parser.parse_args()
 
@@ -908,7 +916,13 @@ if __name__ == "__main__":
         generate_alphas(clips, device=device)
     elif args.action == "run_inference":
         clips = scan_clips()
-        run_inference(clips, device=device, backend=args.backend, max_frames=args.max_frames)
+        run_inference(
+            clips,
+            device=device,
+            backend=args.backend,
+            max_frames=args.max_frames,
+            settings=InferenceSettings(img_size=args.img_size),
+        )
     elif args.action == "wizard":
         if not args.win_path:
             print("Error: --win_path required for wizard.")

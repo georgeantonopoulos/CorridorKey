@@ -74,6 +74,7 @@ class TestInferenceSettings:
         assert s.auto_despeckle is True
         assert s.despeckle_size == 400
         assert s.refiner_scale == 1.0
+        assert s.img_size is None
 
     def test_custom_values(self):
         s = InferenceSettings(
@@ -82,12 +83,14 @@ class TestInferenceSettings:
             auto_despeckle=False,
             despeckle_size=200,
             refiner_scale=1.5,
+            img_size=2048,
         )
         assert s.input_is_linear is True
         assert s.despill_strength == 0.8
         assert s.auto_despeckle is False
         assert s.despeckle_size == 200
         assert s.refiner_scale == 1.5
+        assert s.img_size == 2048
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +170,8 @@ class TestNonInteractiveFlags:
                 "200",
                 "--refiner",
                 "1.5",
+                "--img-size",
+                "1536",
             ],
         )
         assert result.exit_code == 0
@@ -179,6 +184,7 @@ class TestNonInteractiveFlags:
         assert settings.auto_despeckle is True
         assert settings.despeckle_size == 200
         assert settings.refiner_scale == 1.5
+        assert settings.img_size == 1536
 
     @patch("corridorkey_cli.scan_clips")
     @patch("corridorkey_cli.run_inference")
@@ -237,6 +243,7 @@ class TestNonInteractiveFlags:
         assert result.exit_code == 0
         plain = ANSI_ESCAPE.sub("", result.output)
         assert "--despill" in plain
+        assert "--img-size" in plain
         assert "--linear" in plain
         assert "--refiner" in plain
         assert "--despeckle-size" in plain

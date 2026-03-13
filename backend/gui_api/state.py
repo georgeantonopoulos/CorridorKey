@@ -172,7 +172,7 @@ class GuiApiState:
 
         if job.job_type == JobType.INFERENCE:
             self.queue.report_phase("Running CorridorKey inference")
-            settings = InferenceParams(**(job.params.get("settings") or {}))
+            settings = InferenceParams.from_dict(job.params.get("settings") or {})
             self.service.run_inference(
                 clip,
                 settings,
@@ -686,7 +686,7 @@ class GuiApiState:
         clip = self.load_clip(clip_id)
         if clip is None:
             raise RuntimeError("Clip is not available")
-        params = InferenceParams(**settings)
+        params = InferenceParams.from_dict(settings)
         result = self.service.reprocess_single_frame(clip, params, frame_index)
         if result is None:
             raise RuntimeError("Preview failed")

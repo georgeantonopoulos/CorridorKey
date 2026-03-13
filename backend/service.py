@@ -85,14 +85,24 @@ class InferenceParams:
     auto_despeckle: bool = True
     despeckle_size: int = 400
     refiner_scale: float = 1.0
+    img_size: int | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "InferenceParams":
+        aliases = {
+            "inputIsLinear": "input_is_linear",
+            "despillStrength": "despill_strength",
+            "autoDespeckle": "auto_despeckle",
+            "despeckleSize": "despeckle_size",
+            "refinerScale": "refiner_scale",
+            "imgSize": "img_size",
+        }
+        normalized = {aliases.get(key, key): value for key, value in d.items()}
         known = {f.name for f in cls.__dataclass_fields__.values()}
-        return cls(**{k: v for k, v in d.items() if k in known})
+        return cls(**{k: v for k, v in normalized.items() if k in known})
 
 
 @dataclass
@@ -156,6 +166,7 @@ class CorridorKeyService:
 
     def __init__(self):
         self._engine = None
+        self._engine_img_size: int | None = None
         self._gvm_processor = None
         self._videomama_pipeline = None
         self._active_model = _ActiveModel.NONE
@@ -274,6 +285,7 @@ class CorridorKeyService:
             if self._active_model == _ActiveModel.INFERENCE:
                 self._safe_offload(self._engine)
                 self._engine = None
+                self._engine_img_size = None
             elif self._active_model == _ActiveModel.GVM:
                 self._safe_offload(self._gvm_processor)
                 self._gvm_processor = None
@@ -298,12 +310,47 @@ class CorridorKeyService:
 
         self._active_model = needed
 
-    def _get_engine(self):
+    def _resolve_engine_img_size(self, requested_img_size: int | None) -> int:
+        if requested_img_size is not None:
+            return requested_img_size
+
+        if self._device == "mps":
+            from device_utils import get_system_memory_gb, recommend_mps_img_size
+
+            return recommend_mps_img_size(get_system_memory_gb(), device=self._device)
+
+        return 2048
+
+    def _reload_engine(self) -> None:
+        if self._engine is None:
+            return
+
+        self._safe_offload(self._engine)
+        self._engine = None
+        self._engine_img_size = None
+
+        import gc
+
+        gc.collect()
+
+        try:
+            from device_utils import clear_device_cache
+
+            clear_device_cache(self._device)
+        except ImportError:
+            logger.debug("device_utils not available for cache clear during engine reload")
+
+    def _get_engine(self, requested_img_size: int | None = None):
         """Lazy-load the CorridorKey inference engine."""
         self._ensure_model(_ActiveModel.INFERENCE)
+        effective_img_size = self._resolve_engine_img_size(requested_img_size)
+
+        if self._engine is not None and self._engine_img_size == effective_img_size:
+            return self._engine
 
         if self._engine is not None:
-            return self._engine
+            logger.info("Reloading inference engine for img_size=%d", effective_img_size)
+            self._reload_engine()
 
         try:
             from CorridorKeyModule.inference_engine import CorridorKeyEngine
@@ -327,8 +374,9 @@ class CorridorKeyService:
         self._engine = CorridorKeyEngine(
             checkpoint_path=ckpt_path,
             device=self._device,
-            img_size=2048,
+            img_size=effective_img_size,
         )
+        self._engine_img_size = effective_img_size
         logger.info(f"Engine loaded in {time.monotonic() - t0:.1f}s")
         return self._engine
 
@@ -369,6 +417,7 @@ class CorridorKeyService:
         self._safe_offload(self._gvm_processor)
         self._safe_offload(self._videomama_pipeline)
         self._engine = None
+        self._engine_img_size = None
         self._gvm_processor = None
         self._videomama_pipeline = None
         self._active_model = _ActiveModel.NONE
@@ -591,7 +640,7 @@ class CorridorKeyService:
         t_start = time.monotonic()
 
         with self._gpu_lock:
-            engine = self._get_engine()
+            engine = self._get_engine(params.img_size)
         dirs = ensure_output_dirs(clip.root_path)
         cfg = output_config or OutputConfig()
 
@@ -771,7 +820,7 @@ class CorridorKeyService:
             return None
 
         with self._gpu_lock:
-            engine = self._get_engine()
+            engine = self._get_engine(params.img_size)
 
         # Read the specific input frame
         if clip.input_asset.asset_type == "video":
