@@ -1,6 +1,7 @@
 import type { ClipDto, ValidationIssueDto } from "./types";
 
-export type ClipActionKind = "extract" | "gvm" | "videomama" | "inference";
+export type ClipActionKind = "extract" | "gvm" | "rvm" | "videomama" | "inference";
+export type AlphaGeneratorActionKind = "gvm" | "rvm" | "videomama";
 
 export type WorkflowAction = {
   action: ClipActionKind;
@@ -29,9 +30,10 @@ export type ImportReview = {
 const videoExtensions = new Set(["mp4", "mov", "avi", "mkv", "mxf", "webm", "m4v"]);
 const imageExtensions = new Set(["png", "jpg", "jpeg", "exr", "tif", "tiff", "bmp", "dpx"]);
 
-const actionLabels: Record<ClipActionKind, string> = {
+export const actionLabels: Record<ClipActionKind, string> = {
   extract: "Extract frames",
   gvm: "Generate alpha with GVM",
+  rvm: "Generate alpha with RVM",
   videomama: "Generate alpha with VideoMaMa",
   inference: "Run CorridorKey"
 };
@@ -126,6 +128,16 @@ export function summarizeWorkflow(clip: ClipDto | null): WorkflowSummary {
           []
         );
       }
+      if (available.has("rvm")) {
+        return buildSummary(
+          clip,
+          "Plate ready",
+          "Generate an alpha hint",
+          "Your frames are ready, but CorridorKey still needs a coarse alpha hint before inference can run.",
+          "rvm",
+          []
+        );
+      }
       if (available.has("gvm")) {
         return buildSummary(
           clip,
@@ -140,7 +152,7 @@ export function summarizeWorkflow(clip: ClipDto | null): WorkflowSummary {
         clip,
         "Plate ready",
         "Alpha hint required",
-        "This clip is staged correctly, but no alpha hint is available yet. Install GVM weights or add a hint manually.",
+        "This clip is staged correctly, but no alpha hint is available yet. Install an alpha model or add a hint manually.",
         null,
         []
       );
@@ -172,7 +184,7 @@ export function summarizeWorkflow(clip: ClipDto | null): WorkflowSummary {
         []
       );
     case "ERROR": {
-      const retryOrder: ClipActionKind[] = ["extract", "gvm", "videomama", "inference"];
+      const retryOrder: ClipActionKind[] = ["extract", "rvm", "gvm", "videomama", "inference"];
       const primary = retryOrder.find((action) => available.has(action)) ?? null;
       return buildSummary(
         clip,

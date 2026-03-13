@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildImportReview, describeImportSource, summarizeWorkflow } from "../src/renderer/src/lib/workflow";
 
 describe("workflow helpers", () => {
-  it("prefers GVM when a raw clip is ready for alpha generation", () => {
+  it("prefers RVM when a raw clip is ready for alpha generation", () => {
     const summary = summarizeWorkflow({
       id: "project/clip",
       name: "clip",
@@ -21,11 +21,11 @@ describe("workflow helpers", () => {
       ],
       currentJobId: null,
       lastJobId: null,
-      availableActions: ["gvm"],
+      availableActions: ["rvm", "gvm"],
       hasOutputs: false
     });
 
-    expect(summary.primaryAction?.action).toBe("gvm");
+    expect(summary.primaryAction?.action).toBe("rvm");
     expect(summary.headline).toContain("Generate");
   });
 

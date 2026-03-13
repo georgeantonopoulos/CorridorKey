@@ -17,6 +17,8 @@ class CapabilityDto(BaseModel):
     mlxCheckpointReady: bool
     gvmAvailable: bool
     gvmWeightsReady: bool
+    rvmAvailable: bool
+    rvmWeightsReady: bool
     videomamaAvailable: bool
     detectedDevice: str
     detectedBackend: str
@@ -83,6 +85,7 @@ class ImportRequest(BaseModel):
 
 class ClipActionRequest(BaseModel):
     settings: dict | None = None
+    generator: str | None = None
 
 
 class DownloadTaskDto(BaseModel):

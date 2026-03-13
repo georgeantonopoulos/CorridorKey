@@ -17,11 +17,13 @@ import glob as glob_module
 import json
 import logging
 import os
+import shutil
 import sys
 import threading
 import time
 from dataclasses import asdict, dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
@@ -51,6 +53,9 @@ from .frame_io import (
     read_video_mask_at,
 )
 from .job_queue import GPUJob, GPUJobQueue
+from .rvm import ensure_torchvision_compatibility as ensure_rvm_torchvision_compatibility
+from .rvm import source_root as rvm_source_root
+from .rvm import weights_path as rvm_weights_path
 from .validators import (
     ensure_output_dirs,
     validate_frame_counts,
@@ -73,6 +78,7 @@ class _ActiveModel(Enum):
     NONE = "none"
     INFERENCE = "inference"
     GVM = "gvm"
+    RVM = "rvm"
     VIDEOMAMA = "videomama"
 
 
@@ -168,6 +174,7 @@ class CorridorKeyService:
         self._engine = None
         self._engine_img_size: int | None = None
         self._gvm_processor = None
+        self._rvm_model = None
         self._videomama_pipeline = None
         self._active_model = _ActiveModel.NONE
         self._device: str = "cpu"
@@ -289,6 +296,9 @@ class CorridorKeyService:
             elif self._active_model == _ActiveModel.GVM:
                 self._safe_offload(self._gvm_processor)
                 self._gvm_processor = None
+            elif self._active_model == _ActiveModel.RVM:
+                self._safe_offload(self._rvm_model)
+                self._rvm_model = None
             elif self._active_model == _ActiveModel.VIDEOMAMA:
                 self._safe_offload(self._videomama_pipeline)
                 self._videomama_pipeline = None
@@ -395,6 +405,41 @@ class CorridorKeyService:
         logger.info(f"GVM loaded in {time.monotonic() - t0:.1f}s")
         return self._gvm_processor
 
+    def _get_rvm_model(self):
+        """Lazy-load the RVM model from the downloaded upstream source bundle."""
+        self._ensure_model(_ActiveModel.RVM)
+
+        if self._rvm_model is not None:
+            return self._rvm_model
+
+        source_root = rvm_source_root(BASE_DIR)
+        weights_path = rvm_weights_path(BASE_DIR)
+        if not (source_root / "model" / "model.py").is_file():
+            raise FileNotFoundError(
+                f"RVM source is missing from {source_root}. Download RVM from the Desktop app first."
+            )
+        if not weights_path.is_file():
+            raise FileNotFoundError(
+                f"RVM weights are missing from {weights_path}. Download RVM from the Desktop app first."
+            )
+
+        ensure_rvm_torchvision_compatibility(BASE_DIR)
+        source_root_str = str(source_root)
+        if source_root_str not in sys.path:
+            sys.path.insert(0, source_root_str)
+
+        import torch
+        from model import MattingNetwork
+
+        logger.info("Loading RVM model...")
+        t0 = time.monotonic()
+        model = MattingNetwork("mobilenetv3")
+        state_dict = torch.load(weights_path, map_location="cpu")
+        model.load_state_dict(state_dict)
+        self._rvm_model = model.eval().to(self._device)
+        logger.info(f"RVM loaded in {time.monotonic() - t0:.1f}s")
+        return self._rvm_model
+
     def _get_videomama_pipeline(self):
         """Lazy-load the VideoMaMa inference pipeline."""
         self._ensure_model(_ActiveModel.VIDEOMAMA)
@@ -415,10 +460,12 @@ class CorridorKeyService:
         """Free GPU memory by unloading all engines."""
         self._safe_offload(self._engine)
         self._safe_offload(self._gvm_processor)
+        self._safe_offload(self._rvm_model)
         self._safe_offload(self._videomama_pipeline)
         self._engine = None
         self._engine_img_size = None
         self._gvm_processor = None
+        self._rvm_model = None
         self._videomama_pipeline = None
         self._active_model = _ActiveModel.NONE
         try:
@@ -870,6 +917,11 @@ class CorridorKeyService:
 
     # --- GVM Alpha Generation ---
 
+    @staticmethod
+    def _rvm_downsample_ratio(height: int, width: int) -> float:
+        longest_edge = max(height, width, 1)
+        return min(1.0, 512.0 / float(longest_edge))
+
     def run_gvm(
         self,
         clip: ClipEntry,
@@ -962,14 +1014,137 @@ class CorridorKeyService:
         clip.alpha_asset = ClipAsset(alpha_dir, "sequence")
 
         # Transition RAW → READY
-        try:
-            clip.transition_to(ClipState.READY)
-        except Exception as e:
-            if on_warning:
-                on_warning(f"State transition after GVM: {e}")
+        if clip.state != ClipState.READY:
+            try:
+                clip.transition_to(ClipState.READY)
+            except Exception as e:
+                if on_warning:
+                    on_warning(f"State transition after GVM: {e}")
 
         elapsed = time.monotonic() - t_start
         logger.info(f"GVM complete for '{clip.name}': {clip.alpha_asset.frame_count} alpha frames in {elapsed:.1f}s")
+
+    def run_rvm(
+        self,
+        clip: ClipEntry,
+        job: GPUJob | None = None,
+        on_progress: Callable[[str, int, int], None] | None = None,
+        on_warning: Callable[[str], None] | None = None,
+        on_status: Callable[[str], None] | None = None,
+    ) -> None:
+        """Run RVM auto alpha generation for a clip.
+
+        Transitions clip: RAW → READY (creates AlphaHint directory).
+        """
+        if clip.input_asset is None:
+            raise CorridorKeyError(f"Clip '{clip.name}' missing input asset for RVM")
+
+        import torch
+
+        t_start = time.monotonic()
+        if on_status:
+            on_status("Loading RVM model")
+
+        with self._gpu_lock:
+            model = self._get_rvm_model()
+
+        alpha_dir = Path(clip.root_path) / "AlphaHint"
+        shutil.rmtree(alpha_dir, ignore_errors=True)
+        alpha_dir.mkdir(parents=True, exist_ok=True)
+
+        if clip.input_asset.asset_type == "sequence":
+            input_files = clip.input_asset.get_frame_files()
+            total_frames = len(input_files)
+            stems = [Path(filename).stem for filename in input_files]
+            video_capture = None
+        else:
+            input_files = []
+            total_frames = clip.input_asset.frame_count
+            base_name = Path(clip.input_asset.path).stem
+            stems = [base_name] * total_frames
+            video_capture = cv2.VideoCapture(clip.input_asset.path)
+            if not video_capture.isOpened():
+                raise FrameReadError(clip.name, 0, clip.input_asset.path)
+
+        if total_frames <= 0:
+            raise CorridorKeyError(f"Clip '{clip.name}' has no frames available for RVM")
+
+        def _format_eta(seconds: float) -> str:
+            if seconds <= 0:
+                return "0s"
+            minutes, secs = divmod(int(seconds), 60)
+            hours, minutes = divmod(minutes, 60)
+            if hours:
+                return f"{hours}h {minutes}m"
+            if minutes:
+                return f"{minutes}m {secs}s"
+            return f"{secs}s"
+
+        rec = [None] * 4
+        try:
+            for frame_index in range(total_frames):
+                if job and job.is_cancelled:
+                    raise JobCancelledError(clip.name, frame_index)
+
+                if clip.input_asset.asset_type == "sequence":
+                    frame_path = Path(clip.input_asset.path) / input_files[frame_index]
+                    image = read_image_frame(str(frame_path))
+                    validate_frame_read(image, clip.name, frame_index, str(frame_path))
+                else:
+                    assert video_capture is not None
+                    ok, frame = video_capture.read()
+                    if not ok:
+                        raise FrameReadError(clip.name, frame_index, clip.input_asset.path)
+                    image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+
+                downsample_ratio = self._rvm_downsample_ratio(image.shape[0], image.shape[1])
+                src = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).to(self._device, dtype=torch.float32)
+
+                with torch.inference_mode():
+                    with self._gpu_lock:
+                        _fgr, pha, *rec = model(src, *rec, downsample_ratio=downsample_ratio)
+
+                alpha = pha[0, 0].detach().to("cpu").numpy()
+                alpha_u8 = (np.clip(alpha, 0.0, 1.0) * 255.0).astype(np.uint8)
+                output_path = alpha_dir / f"{stems[frame_index]}_alphaHint_{frame_index:04d}.png"
+                validate_write(cv2.imwrite(str(output_path), alpha_u8), clip.name, frame_index, str(output_path))
+
+                frames_done = frame_index + 1
+                elapsed = max(time.monotonic() - t_start, 1e-6)
+                frames_per_second = frames_done / elapsed
+                remaining = max(total_frames - frames_done, 0)
+                eta = remaining / frames_per_second if frames_per_second > 0 else 0.0
+                status = (
+                    f"RVM progress: {frames_done}/{total_frames} frames, "
+                    f"{frames_per_second:.2f} fps, ETA {_format_eta(eta)}"
+                )
+                if on_status:
+                    on_status(status)
+                if on_progress:
+                    on_progress(clip.name, frames_done, total_frames)
+                if frames_done in {1, total_frames} or (frames_done % 10 == 0):
+                    logger.info("%s for '%s'", status, clip.name)
+        except JobCancelledError:
+            raise
+        except Exception as e:
+            if job and job.is_cancelled:
+                raise JobCancelledError(clip.name, 0) from None
+            raise CorridorKeyError(f"RVM failed for '{clip.name}': {e}") from e
+        finally:
+            if video_capture is not None:
+                video_capture.release()
+
+        clip.alpha_asset = ClipAsset(str(alpha_dir), "sequence")
+
+        if clip.state != ClipState.READY:
+            try:
+                clip.transition_to(ClipState.READY)
+            except Exception as e:
+                if on_warning:
+                    on_warning(f"State transition after RVM: {e}")
+
+        elapsed = time.monotonic() - t_start
+        logger.info(f"RVM complete for '{clip.name}': {clip.alpha_asset.frame_count} alpha frames in {elapsed:.1f}s")
 
     # --- VideoMaMa Alpha Generation ---
 

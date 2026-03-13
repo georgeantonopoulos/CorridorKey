@@ -1,10 +1,12 @@
 import type { CapabilityDto, DownloadTaskDto } from "../lib/types";
 
+type DownloadArtifact = "gvm" | "rvm";
+
 type Props = {
   capabilities: CapabilityDto | null;
   downloads: DownloadTaskDto[];
   backendMessage: string | null;
-  onDownload: (artifact: "gvm") => void;
+  onDownload: (artifact: DownloadArtifact) => void;
 };
 
 export function CapabilityBanner({ capabilities, downloads, backendMessage, onDownload }: Props) {
@@ -20,18 +22,26 @@ export function CapabilityBanner({ capabilities, downloads, backendMessage, onDo
     warnings.push("CorridorKey checkpoint missing.");
   }
 
-  const gvmDownload = downloads.find((task) => task.artifact === "gvm") ?? null;
-  const gvmDownloading = gvmDownload?.status === "queued" || gvmDownload?.status === "running";
-  const gvmLabel = gvmDownloading
-    ? `Downloading GVM (${gvmDownload?.completedSteps ?? 0}/${gvmDownload?.totalSteps ?? 0})`
-    : "Download GVM weights";
-  const gvmSizeHint = gvmDownload?.totalBytes ? formatBytes(gvmDownload.totalBytes) : "~6.5 GB";
-  const gvmProgressHint =
-    gvmDownload && gvmDownloading
-      ? `${formatBytes(gvmDownload.completedBytes)} / ${formatBytes(gvmDownload.totalBytes)}${
-          gvmDownload.currentFile ? ` — ${gvmDownload.currentFile}` : ""
-        }`
-      : `GVM download: ${gvmSizeHint}`;
+  const installCards = [
+    buildDownloadCard({
+      artifact: "rvm",
+      title: "RVM",
+      subtitle: "Lightweight video matting for automatic alpha hints.",
+      ready: capabilities.rvmAvailable,
+      fallbackSize: "~18.85 MB",
+      downloads,
+      buttonLabel: "Download RVM"
+    }),
+    buildDownloadCard({
+      artifact: "gvm",
+      title: "GVM",
+      subtitle: "Heavier automatic alpha generator.",
+      ready: capabilities.gvmWeightsReady,
+      fallbackSize: "~6.5 GB",
+      downloads,
+      buttonLabel: "Download GVM weights"
+    })
+  ].filter((card) => card !== null);
 
   return (
     <div className={`banner ${warnings.length ? "banner-warn" : "banner-good"}`}>
@@ -40,17 +50,66 @@ export function CapabilityBanner({ capabilities, downloads, backendMessage, onDo
       <span>{capabilities.detectedBackend}</span>
       <span className="banner-spacer" />
       {warnings.length ? warnings.join(" ") : "All systems ready."}
-      {!capabilities.gvmWeightsReady ? (
-        <>
-          <span className="banner-spacer" />
-          <span>{gvmProgressHint}</span>
-          <button type="button" disabled={gvmDownloading} onClick={() => onDownload("gvm")}>
-            {gvmLabel}
-          </button>
-        </>
+      {installCards.length > 0 ? (
+        <div className="banner-downloads">
+          {installCards.map((card) => (
+            <div key={card.artifact} className="banner-download-card">
+              <div className="banner-download-copy">
+                <strong>{card.title}</strong>
+                <span>{card.subtitle}</span>
+                <span>{card.progressHint}</span>
+              </div>
+              <button type="button" disabled={card.downloading} onClick={() => onDownload(card.artifact)}>
+                {card.buttonText}
+              </button>
+            </div>
+          ))}
+        </div>
       ) : null}
     </div>
   );
+}
+
+type DownloadCardOptions = {
+  artifact: DownloadArtifact;
+  title: string;
+  subtitle: string;
+  ready: boolean;
+  fallbackSize: string;
+  downloads: DownloadTaskDto[];
+  buttonLabel: string;
+};
+
+function buildDownloadCard({
+  artifact,
+  title,
+  subtitle,
+  ready,
+  fallbackSize,
+  downloads,
+  buttonLabel
+}: DownloadCardOptions) {
+  if (ready) {
+    return null;
+  }
+
+  const task = downloads.find((item) => item.artifact === artifact) ?? null;
+  const downloading = task?.status === "queued" || task?.status === "running";
+  const buttonText = downloading
+    ? `Downloading ${title} (${task?.completedSteps ?? 0}/${task?.totalSteps ?? 0})`
+    : buttonLabel;
+  const progressHint = task && downloading
+    ? `Progress: ${formatBytes(task.completedBytes)} / ${formatBytes(task.totalBytes)}${task.currentFile ? ` • Current file: ${task.currentFile}` : ""}`
+    : `${title} download size: ${task?.totalBytes ? formatBytes(task.totalBytes) : fallbackSize}.`;
+
+  return {
+    artifact,
+    title,
+    subtitle,
+    downloading,
+    buttonText,
+    progressHint
+  };
 }
 
 function formatBytes(bytes: number): string {

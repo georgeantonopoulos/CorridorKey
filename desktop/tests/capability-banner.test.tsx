@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CapabilityBanner } from "../src/renderer/src/components/CapabilityBanner";
 
 describe("CapabilityBanner", () => {
-  it("offers a GVM download action when weights are missing", () => {
+  it("offers RVM and GVM download actions when model files are missing", () => {
     const onDownload = vi.fn();
 
     render(
@@ -16,10 +16,12 @@ describe("CapabilityBanner", () => {
           mlxCheckpointReady: false,
           gvmAvailable: false,
           gvmWeightsReady: false,
+          rvmAvailable: false,
+          rvmWeightsReady: false,
           videomamaAvailable: false,
           detectedDevice: "mps",
           detectedBackend: "mlx",
-          warnings: ["GVM weights are missing."]
+          warnings: ["RVM files are missing.", "GVM weights are missing."]
         }}
         downloads={[]}
         backendMessage={null}
@@ -27,8 +29,11 @@ describe("CapabilityBanner", () => {
       />
     );
 
-    expect(screen.getByText(/GVM download size: about 6.48 GB\./)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Download GVM Weights" }));
+    expect(screen.getByText(/RVM download size: ~18.85 MB\./)).toBeInTheDocument();
+    expect(screen.getByText(/GVM download size: ~6.5 GB\./)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download RVM" }));
+    expect(onDownload).toHaveBeenCalledWith("rvm");
+    fireEvent.click(screen.getByRole("button", { name: "Download GVM weights" }));
     expect(onDownload).toHaveBeenCalledWith("gvm");
   });
 
@@ -42,12 +47,28 @@ describe("CapabilityBanner", () => {
           mlxCheckpointReady: false,
           gvmAvailable: false,
           gvmWeightsReady: false,
+          rvmAvailable: false,
+          rvmWeightsReady: false,
           videomamaAvailable: false,
           detectedDevice: "mps",
           detectedBackend: "mlx",
           warnings: ["GVM weights are missing."]
         }}
         downloads={[
+          {
+            artifact: "rvm",
+            status: "completed",
+            completedSteps: 2,
+            totalSteps: 2,
+            completedBytes: 19792941,
+            totalBytes: 19792941,
+            currentFile: null,
+            currentFileBytes: 0,
+            message: "done",
+            startedAt: null,
+            finishedAt: null,
+            errorMessage: null
+          },
           {
             artifact: "gvm",
             status: "running",

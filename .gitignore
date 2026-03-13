@@ -58,6 +58,9 @@ VideoMaMaInferenceModule/checkpoints/*
 !VideoMaMaInferenceModule/checkpoints/.gitkeep
 gvm_core/weights/*
 !gvm_core/weights/.gitkeep
+rvm_core/downloads/*
+rvm_core/upstream/*
+rvm_core/weights/*
 
 site
 CLAUDE.md

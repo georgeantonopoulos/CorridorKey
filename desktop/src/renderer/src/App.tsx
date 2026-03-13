@@ -18,7 +18,12 @@ import {
   queueClipAction,
   refreshProject
 } from "./lib/api";
-import { buildImportReview, type ClipActionKind, type ImportReview } from "./lib/workflow";
+import {
+  buildImportReview,
+  type AlphaGeneratorActionKind,
+  type ClipActionKind,
+  type ImportReview
+} from "./lib/workflow";
 import type {
   BackendLaunchConfig,
   BackendStatus,
@@ -51,6 +56,7 @@ export function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [selectedAlphaGenerator, setSelectedAlphaGenerator] = useState<AlphaGeneratorActionKind | null>(null);
   const [settings, setSettings] = useState<SettingsState>(defaultSettings);
   const [importReview, setImportReview] = useState<ImportReview | null>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -113,6 +119,27 @@ export function App() {
     }
   }, [selectedClipId, selectedProject]);
 
+  useEffect(() => {
+    if (!selectedClip) {
+      setSelectedAlphaGenerator(null);
+      return;
+    }
+
+    const availableAlphaGenerators = selectedClip.availableActions.filter(
+      (action): action is AlphaGeneratorActionKind => action === "rvm" || action === "gvm" || action === "videomama"
+    );
+    if (!availableAlphaGenerators.length) {
+      setSelectedAlphaGenerator(null);
+      return;
+    }
+
+    if (selectedAlphaGenerator && availableAlphaGenerators.includes(selectedAlphaGenerator)) {
+      return;
+    }
+
+    setSelectedAlphaGenerator(availableAlphaGenerators[0]);
+  }, [selectedAlphaGenerator, selectedClip]);
+
   async function handleImport() {
     try {
       const result = await window.corridorDesktop.pickInputs();
@@ -162,7 +189,7 @@ export function App() {
     }
   }
 
-  async function handleDownload(artifact: "gvm") {
+  async function handleDownload(artifact: "gvm" | "rvm") {
     try {
       const task = await downloadArtifact(artifact);
       setDownloads((items) => [...items.filter((item) => item.artifact !== artifact), task]);
@@ -202,6 +229,8 @@ export function App() {
           <WorkflowPanel
             clip={selectedClip}
             onRunAction={(action) => void handleQueue(action)}
+            selectedAlphaGenerator={selectedAlphaGenerator}
+            onSelectAlphaGenerator={setSelectedAlphaGenerator}
             onOpenClip={() => {
               if (selectedClip) {
                 void window.corridorDesktop.openPath(selectedClip.rootPath);

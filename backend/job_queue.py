@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 class JobType(Enum):
     INFERENCE = "inference"
     GVM_ALPHA = "gvm_alpha"
+    RVM_ALPHA = "rvm_alpha"
     VIDEOMAMA_ALPHA = "videomama_alpha"
     PREVIEW_REPROCESS = "preview_reprocess"
     VIDEO_EXTRACT = "video_extract"

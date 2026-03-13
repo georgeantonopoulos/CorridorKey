@@ -23,6 +23,8 @@ class _FakeState:
             mlxCheckpointReady=False,
             gvmAvailable=True,
             gvmWeightsReady=True,
+            rvmAvailable=True,
+            rvmWeightsReady=True,
             videomamaAvailable=False,
             detectedDevice="cpu",
             detectedBackend="torch",
@@ -59,13 +61,15 @@ class _FakeState:
         return None
 
     def download_artifact(self, artifact: str):
+        total_steps = 2 if artifact == "rvm" else 7
+        total_bytes = 19792941 if artifact == "rvm" else 6481893830
         return DownloadTaskDto(
             artifact=artifact,
             status="queued",
             completedSteps=0,
-            totalSteps=7,
+            totalSteps=total_steps,
             completedBytes=0,
-            totalBytes=6481893830,
+            totalBytes=total_bytes,
             currentFile=None,
             currentFileBytes=0,
             message="queued",
@@ -155,6 +159,19 @@ def test_download_endpoint_queues_artifact(monkeypatch):
             response = client.post("/downloads/gvm", headers={"Authorization": "Bearer secret"})
             assert response.status_code == 200
             assert response.json()["artifact"] == "gvm"
+            assert response.json()["status"] == "queued"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_download_rvm_endpoint_queues_artifact(monkeypatch):
+    monkeypatch.setenv("CORRIDORKEY_GUI_API_TOKEN", "secret")
+    app.dependency_overrides[gui_state] = lambda: _FakeState()
+    try:
+        with TestClient(app) as client:
+            response = client.post("/downloads/rvm", headers={"Authorization": "Bearer secret"})
+            assert response.status_code == 200
+            assert response.json()["artifact"] == "rvm"
             assert response.json()["status"] == "queued"
     finally:
         app.dependency_overrides.clear()
@@ -250,13 +267,62 @@ def test_raw_clip_hides_gvm_action_when_weights_are_missing(monkeypatch, tmp_pat
 
     monkeypatch.setattr("backend.gui_api.state.projects_root", lambda: str(projects_dir))
     monkeypatch.setattr(GuiApiState, "_gvm_ready", lambda self: False)
+    monkeypatch.setattr(GuiApiState, "_rvm_ready", lambda self: False)
 
     state = GuiApiState()
     try:
         project, _issues = state.import_sources([str(seq_dir)], copy_source=True)
         clip = project.clips[0]
         assert "gvm" not in clip.availableActions
+        assert "rvm" not in clip.availableActions
         assert any(issue.code == "missing_gvm_weights" for issue in clip.validationIssues)
+        assert any(issue.code == "missing_rvm" for issue in clip.validationIssues)
+    finally:
+        state.shutdown()
+
+
+def test_raw_clip_prefers_rvm_action_when_available(monkeypatch, tmp_path):
+    projects_dir = tmp_path / "Projects"
+    seq_dir = tmp_path / "Sequence"
+    seq_dir.mkdir()
+    for index in range(2):
+        (seq_dir / f"frame_{index:04d}.png").write_bytes(b"fake")
+
+    monkeypatch.setattr("backend.gui_api.state.projects_root", lambda: str(projects_dir))
+    monkeypatch.setattr(GuiApiState, "_gvm_ready", lambda self: True)
+    monkeypatch.setattr(GuiApiState, "_rvm_ready", lambda self: True)
+
+    state = GuiApiState()
+    try:
+        project, _issues = state.import_sources([str(seq_dir)], copy_source=True)
+        clip = project.clips[0]
+        assert clip.availableActions[:2] == ["rvm", "gvm"]
+    finally:
+        state.shutdown()
+
+
+def test_ready_clip_keeps_alpha_generators_available(monkeypatch, tmp_path):
+    projects_dir = tmp_path / "Projects"
+    clip_dir = projects_dir / "demo" / "clips" / "shot"
+    frames_dir = clip_dir / "Frames"
+    alpha_dir = clip_dir / "AlphaHint"
+    frames_dir.mkdir(parents=True)
+    alpha_dir.mkdir(parents=True)
+    for index in range(2):
+        (frames_dir / f"frame_{index:04d}.png").write_bytes(b"fake")
+        (alpha_dir / f"frame_{index:04d}_alphaHint_{index:04d}.png").write_bytes(b"fake")
+
+    monkeypatch.setattr("backend.gui_api.state.projects_root", lambda: str(projects_dir))
+    monkeypatch.setattr(GuiApiState, "_gvm_ready", lambda self: True)
+    monkeypatch.setattr(GuiApiState, "_rvm_ready", lambda self: True)
+
+    state = GuiApiState()
+    try:
+        project = state.get_project("demo")
+        assert project is not None
+        clip = project.clips[0]
+        assert clip.state == "READY"
+        assert clip.availableActions == ["inference", "rvm", "gvm"]
     finally:
         state.shutdown()
 
@@ -270,6 +336,7 @@ def test_queue_gvm_rejects_when_weights_are_missing(monkeypatch, tmp_path):
 
     monkeypatch.setattr("backend.gui_api.state.projects_root", lambda: str(projects_dir))
     monkeypatch.setattr(GuiApiState, "_gvm_ready", lambda self: False)
+    monkeypatch.setattr(GuiApiState, "_rvm_ready", lambda self: False)
 
     state = GuiApiState()
     try:
@@ -281,6 +348,30 @@ def test_queue_gvm_rejects_when_weights_are_missing(monkeypatch, tmp_path):
             assert "GVM weights are missing" in str(error)
         else:
             raise AssertionError("Expected queue_clip_action to reject missing GVM weights")
+    finally:
+        state.shutdown()
+
+
+def test_queue_rvm_rejects_when_files_are_missing(monkeypatch, tmp_path):
+    projects_dir = tmp_path / "Projects"
+    seq_dir = tmp_path / "Sequence"
+    seq_dir.mkdir()
+    for index in range(2):
+        (seq_dir / f"frame_{index:04d}.png").write_bytes(b"fake")
+
+    monkeypatch.setattr("backend.gui_api.state.projects_root", lambda: str(projects_dir))
+    monkeypatch.setattr(GuiApiState, "_rvm_ready", lambda self: False)
+
+    state = GuiApiState()
+    try:
+        project, _issues = state.import_sources([str(seq_dir)], copy_source=True)
+        clip = project.clips[0]
+        try:
+            state.queue_clip_action(clip.id, "rvm")
+        except RuntimeError as error:
+            assert "RVM files are missing" in str(error)
+        else:
+            raise AssertionError("Expected queue_clip_action to reject missing RVM files")
     finally:
         state.shutdown()
 
@@ -316,5 +407,46 @@ def test_download_gvm_artifact_marks_weights_ready(monkeypatch, tmp_path):
         assert snapshot[0].completedBytes == 6481893830
         assert state.capabilities().gvmWeightsReady is True
         assert state.capabilities().gvmAvailable is True
+    finally:
+        state.shutdown()
+
+
+def test_download_rvm_artifact_marks_files_ready(monkeypatch, tmp_path):
+    downloads_root = tmp_path / "downloads"
+    source_root = tmp_path / "upstream" / "RobustVideoMatting-1.0.0"
+    weights_path = tmp_path / "weights" / "rvm_mobilenetv3.pth"
+
+    def fake_download(url: str, destination: Path):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(url)
+
+    def fake_extract(_archive_path: Path, destination_root: Path):
+        target = destination_root / "RobustVideoMatting-1.0.0" / "model"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "model.py").write_text("ok")
+
+    monkeypatch.setattr(GuiApiState, "_download_url_to_path", staticmethod(fake_download))
+    monkeypatch.setattr(GuiApiState, "_extract_tarball", staticmethod(fake_extract))
+    monkeypatch.setattr(GuiApiState, "_rvm_source_archive_path", staticmethod(lambda: downloads_root / "rvm.tar.gz"))
+    monkeypatch.setattr(GuiApiState, "_rvm_source_root", staticmethod(lambda: source_root))
+    monkeypatch.setattr(GuiApiState, "_rvm_weights_path", staticmethod(lambda: weights_path))
+
+    state = GuiApiState()
+    try:
+        task = state.download_artifact("rvm")
+        assert task.status in {"queued", "running"}
+
+        for _ in range(100):
+            snapshot = state.downloads_snapshot()
+            if snapshot and snapshot[0].status == "completed":
+                break
+            time.sleep(0.01)
+
+        snapshot = state.downloads_snapshot()
+        assert snapshot[0].status == "completed"
+        assert snapshot[0].totalBytes == 19792941
+        assert snapshot[0].completedBytes == 19792941
+        assert state.capabilities().rvmWeightsReady is True
+        assert state.capabilities().rvmAvailable is True
     finally:
         state.shutdown()

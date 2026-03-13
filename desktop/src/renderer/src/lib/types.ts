@@ -24,6 +24,8 @@ export type CapabilityDto = {
   mlxCheckpointReady: boolean;
   gvmAvailable: boolean;
   gvmWeightsReady: boolean;
+  rvmAvailable: boolean;
+  rvmWeightsReady: boolean;
   videomamaAvailable: boolean;
   detectedDevice: string;
   detectedBackend: string;

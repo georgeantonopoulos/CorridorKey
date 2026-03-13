@@ -111,6 +111,11 @@ def gvm_clip(clip_id: str, payload: ClipActionRequest, state: Annotated[GuiApiSt
     return state.queue_clip_action(clip_id, "gvm", payload.settings)
 
 
+@app.post("/clips/{clip_id:path}/rvm", dependencies=[Depends(_token_guard)])
+def rvm_clip(clip_id: str, payload: ClipActionRequest, state: Annotated[GuiApiState, Depends(gui_state)]):
+    return state.queue_clip_action(clip_id, "rvm", payload.settings)
+
+
 @app.post("/clips/{clip_id:path}/videomama", dependencies=[Depends(_token_guard)])
 def videomama_clip(clip_id: str, payload: ClipActionRequest, state: Annotated[GuiApiState, Depends(gui_state)]):
     return state.queue_clip_action(clip_id, "videomama", payload.settings)

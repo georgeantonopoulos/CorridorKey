@@ -1,9 +1,17 @@
 import type { ClipDto } from "../lib/types";
-import { formatClipState, summarizeWorkflow, type ClipActionKind } from "../lib/workflow";
+import {
+  actionLabels,
+  formatClipState,
+  summarizeWorkflow,
+  type AlphaGeneratorActionKind,
+  type ClipActionKind
+} from "../lib/workflow";
 
 type Props = {
   clip: ClipDto | null;
   onRunAction: (action: ClipActionKind) => void;
+  selectedAlphaGenerator: AlphaGeneratorActionKind | null;
+  onSelectAlphaGenerator: (action: AlphaGeneratorActionKind) => void;
   onOpenClip: () => void;
   onOpenOutput: () => void;
 };
@@ -24,9 +32,33 @@ function stagePillClass(state: string): string {
   }
 }
 
-export function WorkflowPanel({ clip, onRunAction, onOpenClip, onOpenOutput }: Props) {
+function isAlphaGeneratorAction(action: ClipActionKind): action is AlphaGeneratorActionKind {
+  return action === "gvm" || action === "rvm" || action === "videomama";
+}
+
+export function WorkflowPanel({
+  clip,
+  onRunAction,
+  selectedAlphaGenerator,
+  onSelectAlphaGenerator,
+  onOpenClip,
+  onOpenOutput
+}: Props) {
   const workflow = summarizeWorkflow(clip);
-  const primaryAction = workflow.primaryAction;
+  const alphaGeneratorActions = clip
+    ? (clip.availableActions.filter((action): action is AlphaGeneratorActionKind =>
+        action === "gvm" || action === "rvm" || action === "videomama"
+      ))
+    : [];
+  const showAlphaGeneratorSelector = alphaGeneratorActions.length > 0;
+  const effectiveAlphaGenerator =
+    selectedAlphaGenerator && alphaGeneratorActions.includes(selectedAlphaGenerator)
+      ? selectedAlphaGenerator
+      : (alphaGeneratorActions[0] ?? null);
+  const canRunInference = clip?.availableActions.includes("inference") ?? false;
+  const secondaryActions = workflow.secondaryActions.filter(
+    (action) => !isAlphaGeneratorAction(action.action) && action.action !== "inference"
+  );
 
   return (
     <section className="card workflow-card">
@@ -62,16 +94,37 @@ export function WorkflowPanel({ clip, onRunAction, onOpenClip, onOpenOutput }: P
         </div>
       ) : null}
 
+      {showAlphaGeneratorSelector && effectiveAlphaGenerator ? (
+        <label className="workflow-selector" htmlFor="alpha-generator-select">
+          <div>
+            <span className="meta-label">Alpha model</span>
+            <p className="workflow-copy">Choose which generator creates the coarse hint before CorridorKey runs.</p>
+          </div>
+          <select
+            id="alpha-generator-select"
+            value={effectiveAlphaGenerator}
+            onChange={(event) => onSelectAlphaGenerator(event.target.value as AlphaGeneratorActionKind)}
+          >
+            {alphaGeneratorActions.map((action) => (
+              <option key={action} value={action}>
+                {actionLabels[action]}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
       <div className="workflow-actions">
-        {primaryAction ? (
-          <button type="button" className="primary-button" onClick={() => onRunAction(primaryAction.action)}>
-            {primaryAction.label}
+        {effectiveAlphaGenerator ? (
+          <button type="button" onClick={() => onRunAction(effectiveAlphaGenerator)}>
+            {actionLabels[effectiveAlphaGenerator]}
           </button>
-        ) : (
-          <span className="inline-note">No pipeline step available yet.</span>
-        )}
+        ) : null}
+        <button type="button" className="primary-button" disabled={!canRunInference} onClick={() => onRunAction("inference")}>
+          {actionLabels.inference}
+        </button>
         <div className="action-cluster">
-          {workflow.secondaryActions.map((action) => (
+          {secondaryActions.map((action) => (
             <button key={action.action} type="button" onClick={() => onRunAction(action.action)}>
               {action.label}
             </button>

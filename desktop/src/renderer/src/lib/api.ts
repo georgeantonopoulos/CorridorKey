@@ -71,7 +71,11 @@ export async function refreshProject(projectId: string) {
   return response.json();
 }
 
-export async function queueClipAction(clipId: string, action: "extract" | "gvm" | "videomama" | "inference", settings?: SettingsState) {
+export async function queueClipAction(
+  clipId: string,
+  action: "extract" | "gvm" | "rvm" | "videomama" | "inference",
+  settings?: SettingsState
+) {
   const response = await authedFetch(`/clips/${clipId}/${action}`, {
     method: "POST",
     body: JSON.stringify({ settings: serializeSettings(settings) })
@@ -92,7 +96,7 @@ export async function cancelJob(jobId: string) {
   }
 }
 
-export async function downloadArtifact(artifact: "gvm"): Promise<DownloadTaskDto> {
+export async function downloadArtifact(artifact: "gvm" | "rvm"): Promise<DownloadTaskDto> {
   const response = await authedFetch(`/downloads/${artifact}`, {
     method: "POST"
   });

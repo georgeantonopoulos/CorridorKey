@@ -5,8 +5,11 @@ import json
 import logging
 import os
 import shutil
+import tarfile
+import tempfile
 import threading
 import time
+import urllib.request
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
@@ -33,6 +36,24 @@ from backend.project import (
     sanitize_stem,
     write_clip_json,
     write_project_json,
+)
+from backend.rvm import (
+    RVM_MOBILENET_WEIGHTS_SIZE,
+    RVM_MOBILENET_WEIGHTS_URL,
+    RVM_SOURCE_ARCHIVE_SIZE,
+    RVM_SOURCE_ARCHIVE_URL,
+)
+from backend.rvm import (
+    ensure_torchvision_compatibility as ensure_rvm_torchvision_compatibility,
+)
+from backend.rvm import (
+    source_archive_path as rvm_source_archive_path,
+)
+from backend.rvm import (
+    source_root as rvm_source_root,
+)
+from backend.rvm import (
+    weights_path as rvm_weights_path,
 )
 from backend.service import CorridorKeyService, InferenceParams
 from CorridorKeyModule.backend import resolve_backend
@@ -62,6 +83,22 @@ GVM_FILE_SIZES = {
     "vae/config.json": 561,
     "vae/diffusion_pytorch_model.safetensors": 391017740,
 }
+RVM_DOWNLOAD_FILES = [
+    {
+        "label": "RobustVideoMatting source",
+        "filename": Path(RVM_SOURCE_ARCHIVE_URL).name,
+        "url": RVM_SOURCE_ARCHIVE_URL,
+        "size": RVM_SOURCE_ARCHIVE_SIZE,
+        "kind": "archive",
+    },
+    {
+        "label": "rvm_mobilenetv3.pth",
+        "filename": Path(RVM_MOBILENET_WEIGHTS_URL).name,
+        "url": RVM_MOBILENET_WEIGHTS_URL,
+        "size": RVM_MOBILENET_WEIGHTS_SIZE,
+        "kind": "weights",
+    },
+]
 
 
 @dataclass
@@ -159,6 +196,17 @@ class GuiApiState:
             )
             return
 
+        if job.job_type == JobType.RVM_ALPHA:
+            self.queue.report_phase("Generating RVM alpha")
+            self.service.run_rvm(
+                clip,
+                job=job,
+                on_progress=self.queue.report_progress,
+                on_warning=self.queue.report_warning,
+                on_status=self.queue.report_phase,
+            )
+            return
+
         if job.job_type == JobType.VIDEOMAMA_ALPHA:
             self.queue.report_phase("Loading VideoMaMa")
             self.service.run_videomama(
@@ -227,6 +275,8 @@ class GuiApiState:
 
         gvm_weights_ready = self._gvm_weights_ready()
         gvm_available = self._module_available("gvm_core") and os.path.isdir("gvm_core") and gvm_weights_ready
+        rvm_weights_ready = self._rvm_weights_ready()
+        rvm_available = self._rvm_ready()
         videomama_available = self._module_available("VideoMaMaInferenceModule") and os.path.isdir(
             "VideoMaMaInferenceModule"
         )
@@ -237,6 +287,11 @@ class GuiApiState:
             warnings.append(
                 "GVM weights are missing. Download them from the Desktop app or run "
                 "`uv run hf download geyongtao/gvm --local-dir gvm_core/weights`."
+            )
+        if not rvm_available:
+            warnings.append(
+                "RVM files are missing. Download them from the Desktop app "
+                "to enable the lightweight alpha generator."
             )
         if not find_ffmpeg():
             warnings.append("ffmpeg is not available on PATH.")
@@ -250,6 +305,8 @@ class GuiApiState:
             mlxCheckpointReady=mlx_checkpoint,
             gvmAvailable=gvm_available,
             gvmWeightsReady=gvm_weights_ready,
+            rvmAvailable=rvm_available,
+            rvmWeightsReady=rvm_weights_ready,
             videomamaAvailable=videomama_available,
             detectedDevice=detected_device,
             detectedBackend=detected_backend,
@@ -308,12 +365,18 @@ class GuiApiState:
         if clip.state == ClipState.RAW:
             if clip.input_asset and clip.input_asset.asset_type == "video":
                 actions.append("extract")
+            if self._rvm_ready():
+                actions.append("rvm")
             if self._gvm_ready():
                 actions.append("gvm")
         if clip.state == ClipState.MASKED:
             actions.append("videomama")
         if clip.state == ClipState.READY:
             actions.append("inference")
+            if self._rvm_ready():
+                actions.append("rvm")
+            if self._gvm_ready():
+                actions.append("gvm")
         if clip.state == ClipState.ERROR and clip.input_asset and clip.input_asset.asset_type == "video":
             actions.append("extract")
 
@@ -355,9 +418,20 @@ class GuiApiState:
                 ValidationIssueDto(
                     severity="warning",
                     code="missing_alpha",
-                    message="Alpha hint is missing. Run GVM or attach a matte hint.",
+                    message="Alpha hint is missing. Run an alpha generator or attach a matte hint.",
                 )
             )
+            if not self._rvm_ready():
+                issues.append(
+                    ValidationIssueDto(
+                        severity="warning",
+                        code="missing_rvm",
+                        message=(
+                            "RVM is not installed. Download it from the Desktop app "
+                            "to enable the lighter alpha generator."
+                        ),
+                    )
+                )
             if not self._gvm_ready():
                 issues.append(
                     ValidationIssueDto(
@@ -410,10 +484,13 @@ class GuiApiState:
                 "GVM weights are missing. Download them from the Desktop app or run "
                 "`uv run hf download geyongtao/gvm --local-dir gvm_core/weights`."
             )
+        if action == "rvm" and not self._rvm_ready():
+            raise RuntimeError("RVM files are missing. Download them from the Desktop app before using RVM.")
 
         mapping = {
             "extract": JobType.VIDEO_EXTRACT,
             "gvm": JobType.GVM_ALPHA,
+            "rvm": JobType.RVM_ALPHA,
             "videomama": JobType.VIDEOMAMA_ALPHA,
             "inference": JobType.INFERENCE,
         }
@@ -431,7 +508,7 @@ class GuiApiState:
         self.queue.cancel_job(job)
 
     def download_artifact(self, artifact: str) -> DownloadTaskDto:
-        if artifact != "gvm":
+        if artifact not in {"gvm", "rvm"}:
             raise RuntimeError(f"Unsupported download artifact: {artifact}")
 
         with self.download_lock:
@@ -439,24 +516,35 @@ class GuiApiState:
             if existing and existing.status in {"queued", "running"}:
                 return self._download_dto(existing)
 
+            if artifact == "gvm":
+                total_steps = len(GVM_REQUIRED_FILES) + len(GVM_OPTIONAL_FILES)
+                total_bytes = sum(GVM_FILE_SIZES[filename] for filename in [*GVM_REQUIRED_FILES, *GVM_OPTIONAL_FILES])
+                message = "Queued GVM weight download."
+                target = self._download_gvm_weights
+            else:
+                total_steps = len(RVM_DOWNLOAD_FILES)
+                total_bytes = sum(item["size"] for item in RVM_DOWNLOAD_FILES)
+                message = "Queued RVM download."
+                target = self._download_rvm_artifact
+
             task = DownloadTaskState(
                 artifact=artifact,
                 status="queued",
                 completed_steps=0,
-                total_steps=len(GVM_REQUIRED_FILES) + len(GVM_OPTIONAL_FILES),
+                total_steps=total_steps,
                 completed_bytes=0,
-                total_bytes=sum(GVM_FILE_SIZES[filename] for filename in [*GVM_REQUIRED_FILES, *GVM_OPTIONAL_FILES]),
+                total_bytes=total_bytes,
                 current_file=None,
                 current_file_bytes=0,
-                message="Queued GVM weight download.",
+                message=message,
                 started_at=datetime.now().isoformat(),
             )
             self.download_tasks[artifact] = task
 
         thread = threading.Thread(
-            target=self._download_gvm_weights,
+            target=target,
             args=(artifact,),
-            name="corridorkey-download-gvm",
+            name=f"corridorkey-download-{artifact}",
             daemon=True,
         )
         thread.start()
@@ -763,6 +851,27 @@ class GuiApiState:
     def _gvm_ready(self) -> bool:
         return self._module_available("gvm_core") and os.path.isdir("gvm_core") and self._gvm_weights_ready()
 
+    @staticmethod
+    def _rvm_source_root() -> Path:
+        return rvm_source_root()
+
+    @staticmethod
+    def _rvm_source_archive_path() -> Path:
+        return rvm_source_archive_path()
+
+    @staticmethod
+    def _rvm_weights_path() -> Path:
+        return rvm_weights_path()
+
+    def _rvm_source_ready(self) -> bool:
+        return (self._rvm_source_root() / "model" / "model.py").is_file()
+
+    def _rvm_weights_ready(self) -> bool:
+        return self._rvm_weights_path().is_file()
+
+    def _rvm_ready(self) -> bool:
+        return self._rvm_source_ready() and self._rvm_weights_ready()
+
     def _download_gvm_weights(self, artifact: str) -> None:
         root = self._gvm_weights_root()
         root.mkdir(parents=True, exist_ok=True)
@@ -811,6 +920,82 @@ class GuiApiState:
                 task.finished_at = datetime.now().isoformat()
                 task.error_message = str(error)
                 task.message = "GVM weight download failed."
+
+    @staticmethod
+    def _download_url_to_path(url: str, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(url) as response, tempfile.NamedTemporaryFile(
+            dir=destination.parent,
+            delete=False,
+        ) as handle:
+            shutil.copyfileobj(response, handle)
+            temp_path = Path(handle.name)
+        temp_path.replace(destination)
+
+    @staticmethod
+    def _extract_tarball(archive_path: Path, destination_root: Path) -> None:
+        destination_root.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(archive_path, "r:gz") as archive:
+            for member in archive.getmembers():
+                target_path = destination_root / member.name
+                if not target_path.resolve().is_relative_to(destination_root.resolve()):
+                    raise RuntimeError(f"Unsafe archive entry: {member.name}")
+            archive.extractall(destination_root)
+
+    def _download_rvm_artifact(self, artifact: str) -> None:
+        source_archive = self._rvm_source_archive_path()
+        source_root = self._rvm_source_root()
+        weights_path = self._rvm_weights_path()
+
+        with self.download_lock:
+            task = self.download_tasks[artifact]
+            task.status = "running"
+            task.message = "Downloading RVM model files..."
+            task.error_message = None
+
+        logger.info("Starting RVM download into %s", source_root.parent)
+
+        try:
+            for index, item in enumerate(RVM_DOWNLOAD_FILES, start=1):
+                destination = source_archive if item["kind"] == "archive" else weights_path
+                with self.download_lock:
+                    task = self.download_tasks[artifact]
+                    task.current_file = item["filename"]
+                    task.current_file_bytes = item["size"]
+                    task.message = f"Downloading RVM file {index}/{len(RVM_DOWNLOAD_FILES)}: {item['filename']}"
+                self._download_url_to_path(item["url"], destination)
+
+                if item["kind"] == "archive":
+                    with self.download_lock:
+                        task = self.download_tasks[artifact]
+                        task.message = "Extracting RVM source archive..."
+                    shutil.rmtree(source_root, ignore_errors=True)
+                    self._extract_tarball(source_archive, source_root.parent)
+                    ensure_rvm_torchvision_compatibility()
+
+                with self.download_lock:
+                    task = self.download_tasks[artifact]
+                    task.completed_steps = index
+                    task.completed_bytes += item["size"]
+                    task.message = f"Downloaded {index}/{len(RVM_DOWNLOAD_FILES)} RVM files."
+
+            with self.download_lock:
+                task = self.download_tasks[artifact]
+                task.status = "completed"
+                task.current_file = None
+                task.current_file_bytes = 0
+                task.finished_at = datetime.now().isoformat()
+                task.message = "RVM downloaded successfully."
+            logger.info("RVM downloaded successfully.")
+        except Exception as error:
+            logger.exception("Failed to download RVM")
+            with self.download_lock:
+                task = self.download_tasks[artifact]
+                task.status = "failed"
+                task.current_file = None
+                task.finished_at = datetime.now().isoformat()
+                task.error_message = str(error)
+                task.message = "RVM download failed."
 
     @staticmethod
     def _load_source_frame(clip: ClipEntry, frame_index: int) -> np.ndarray:

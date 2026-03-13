@@ -209,6 +209,42 @@ button, input, select {
   margin: 0 4px;
 }
 
+.banner-downloads {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--gap-sm);
+  width: 100%;
+  margin-top: 4px;
+}
+
+.banner-download-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-md);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(8, 12, 18, 0.4);
+}
+
+.banner-download-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.banner-download-copy strong {
+  font-size: 0.84rem;
+}
+
+.banner-download-copy span {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  word-break: break-word;
+}
+
 /* ═══════════════════════════════════════════════════════
    PROJECT RAIL (left sidebar)
    ═══════════════════════════════════════════════════════ */
@@ -397,6 +433,17 @@ button, input, select {
   display: block;
   font-size: 0.95rem;
   font-weight: 600;
+}
+
+.workflow-selector {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  align-items: center;
+  gap: var(--gap-md);
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, rgba(18, 26, 35, 0.9), rgba(12, 19, 28, 0.95));
 }
 
 /* ── Workflow actions — clear hierarchy ───────────────── */
@@ -736,7 +783,8 @@ button:disabled {
    FORM CONTROLS
    ═══════════════════════════════════════════════════════ */
 input[type="number"],
-input[type="text"] {
+input[type="text"],
+select {
   width: 100px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
@@ -748,9 +796,14 @@ input[type="text"] {
 }
 
 input[type="number"]:focus,
-input[type="text"]:focus {
+input[type="text"]:focus,
+select:focus {
   outline: none;
   border-color: var(--border-focus);
+}
+
+select {
+  width: 100%;
 }
 
 /* ── Range slider ────────────────────────────────────── */
